@@ -74,7 +74,7 @@ resumen-ai-backend/
 
 ### Collaboration Guide
 
-- **Create a new branch for each feature:**
+- **Create a new branch for each feature: AND NEVER WORK/PUSH YOUR WORK IN MAIN OR DEV DIRECTLY!**
 
 ```bash
 
