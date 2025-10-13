@@ -86,27 +86,6 @@ resumen-ai-backend/
 ### For swagger, add "/docs" in the url e.g : http://127.0.0.1:8000/docs#/
 
 #
-
-#
-
-#
-
-#
-
-#
-
-#
-
-#
-
-#
-
-#
-
-#
-
-#
-
 #
 
 ### To deactivate the VENV (Virtual ENVironment) run this command in terminal : deactivate
