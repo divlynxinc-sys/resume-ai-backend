@@ -22,13 +22,14 @@ This backend is built with **FastAPI** and **PostgreSQL** for scalability and pe
 ```bash
 git clone https://github.com/yourusername/resumen-ai-backend.git
 cd resumen-ai-backend
-```
+
 
 python -m venv venv
 source venv/bin/activate # for mac/linux
 venv\Scripts\activate # for windows
 
 pip install -r requirements.txt
+```
 
 ### Skip the database part for now. It is under review (not finalised)
 
@@ -42,10 +43,13 @@ ACCESS_TOKEN_EXPIRE_MINUTES=30
 
 ### Run the Server
 
+```bash
 uvicorn app.main:app --reload
+```
 
 ### Project Structure
 
+```bash
 resumen-ai-backend/
 │
 ├── app/
@@ -66,13 +70,22 @@ resumen-ai-backend/
 ├── requirements.txt
 ├── .env
 └── README.md
+```
 
 ### Collaboration Guide
 
-- **Create a new branch for each feature:**
+- **Create a new branch for each feature: AND NEVER WORK/PUSH YOUR WORK IN MAIN OR DEV DIRECTLY!**
+
+```bash
+
   git checkout -b feature/resume-upload
+```
+
 - **Push and create a pull request:**
+
+```bash
   git push origin feature/resume-upload
+```
 
 - **Use .env.example for shared configs.**
 
@@ -85,7 +98,6 @@ resumen-ai-backend/
 
 ### For swagger, add "/docs" in the url e.g : http://127.0.0.1:8000/docs#/
 
-#
 #
 
 ### To deactivate the VENV (Virtual ENVironment) run this command in terminal : deactivate
