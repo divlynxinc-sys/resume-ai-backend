@@ -1,0 +1,119 @@
+# ======================================
+# 🧠 Python / FastAPI Project Gitignore
+# ======================================
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.pkl
+*.log
+*.pot
+*.pyc
+*.sqlite3
+
+# ---- Virtual Environment ----
+venv/
+.env/
+.env.*        # any env variants like .env.dev, .env.local
+*.env
+
+# ---- IDE & Editors ----
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# ---- OS Files ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Byte-compiled / Optimized / DLL files ----
+*.py[cod]
+*$py.class
+
+# ---- Build / Distribution / Packaging ----
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- Unit test / Coverage reports ----
+htmlcov/
+.tox/
+.nox/
+.coverage
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+nosetests.xml
+test-results/
+.cache/
+
+# ---- Jupyter Notebook ----
+.ipynb_checkpoints
+*.ipynb
+
+# ---- Migrations / Database ----
+alembic/versions/__pycache__/
+*.db
+*.sqlite
+*.sql
+migrations/
+__pycache__/
+
+# ---- Logs ----
+*.log
+logs/
+*.out
+*.err
+
+# ---- Environment Variables ----
+.env
+.env.local
+.env.prod
+.env.test
+
+# ---- Temporary files ----
+tmp/
+temp/
+*.bak
+*.swp
+*.tmp
+
+# ---- Node / Frontend (if frontend exists in same repo) ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.DS_Store
+
+# ---- Docker ----
+*.pid
+*.seed
+*.pid.lock
+docker-compose.override.yml
+
+# ---- VSCode ----
+.vscode/
+.history/
