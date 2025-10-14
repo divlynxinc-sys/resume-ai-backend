@@ -1,4 +1,4 @@
-# 🧠 Resumen AI Backend
+# 🧠 Resume AI Backend
 
 Resumen AI helps users create professional resumes from scratch or enhance existing ones using AI.  
 This backend is built with **FastAPI** and **PostgreSQL** for scalability and performance.
