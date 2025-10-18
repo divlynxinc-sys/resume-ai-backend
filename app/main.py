@@ -1,10 +1,10 @@
 from fastapi import FastAPI
-from app.routers import user_routes
+from app.routers.user_routes import router as user_router
 
-app = FastAPI(title="Resumen AI Backend")
+app = FastAPI(title="ResumeAI Backend")
 
-app.include_router(user_routes.router)
+app.include_router(user_router)
 
 @app.get("/")
 def root():
-    return {"message": "Resumen AI backend is running 🚀"}
+    return {"message": "ResumeAI backend is running 🚀"}
