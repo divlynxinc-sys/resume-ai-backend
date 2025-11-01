@@ -1,15 +1,13 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from pymongo import MongoClient
+from dotenv import load_dotenv
 import os
-from app.database.connection import Base, engine
-from app.models.user import User
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost/resumen_ai")
+load_dotenv()
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+# Use environment variable or default to localhost
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+client = MongoClient(MONGO_URI)
+db = client["resume_ai"]  # Fixed database name
 
-print("Creating database...")
-Base.metadata.create_all(bind=engine)
+def get_db():
+    return db
