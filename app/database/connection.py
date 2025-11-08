@@ -1,13 +1,37 @@
-from pymongo import MongoClient
-from dotenv import load_dotenv
 import os
+from typing import Generator
 
-load_dotenv()
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-# Use environment variable or default to localhost
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-client = MongoClient(MONGO_URI)
-db = client["resume_ai"]  # Fixed database name
+from app.core.env import load_env
+from urllib.parse import quote_plus
 
-def get_db():
-    return db
+load_env()
+
+
+def _build_db_url_from_parts() -> str:
+    name = os.getenv("DB_NAME", "resume_ai")
+    user = os.getenv("DB_USER", "postgres")
+    password = os.getenv("DB_PASSWORD", "postgres")
+    host = os.getenv("DB_HOST", "localhost")
+    port = os.getenv("DB_PORT", "5432")
+    return f"postgresql+psycopg2://{user}:{quote_plus(password)}@{host}:{port}/{name}"
+
+
+DATABASE_URL = os.getenv("DATABASE_URL") or _build_db_url_from_parts()
+
+engine = create_engine(DATABASE_URL, future=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+def get_db() -> Generator:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

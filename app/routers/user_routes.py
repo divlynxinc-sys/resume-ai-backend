@@ -1,25 +1,29 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
 from app.schemas.user_schema import UserCreate
 from app.database.connection import get_db
+from app.utils.auth_utils import hash_password
+from app.core.config import Roles
 from app.models.user import User
-from pydantic import EmailStr
 
 router = APIRouter(prefix="/users", tags=["Users"]) 
 
 @router.post("/register")
-def register_user(user: UserCreate, db = Depends(get_db)):
-    # Check if user already exists
-    existing_user = db.users.find_one({"email": user.email})
+def register_user(user: UserCreate, db: Session = Depends(get_db)):
+    email_normalized = user.email.lower()
+    existing_user = db.query(User).filter(User.email == email_normalized).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create user model from schema
-    user_data = User(
+
+    instance = User(
         name=user.name,
-        email=EmailStr(user.email),
-        password=user.password
+        email=email_normalized,
+        password_hash=hash_password(user.password),
+        role=Roles.user,
+        token_version=1,
     )
-    
-    # Insert into database
-    db.users.insert_one(user_data.dict())
+    db.add(instance)
+    db.commit()
     return {"message": "User registered successfully!"}
