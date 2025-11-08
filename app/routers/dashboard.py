@@ -26,7 +26,7 @@ def get_summary(db: Session = Depends(get_db), user: User = Depends(require_role
         .all()
     )
     recent_items: List[DashboardRecentItem] = [
-        DashboardRecentItem(id=r.id, title=r.title, updated_at=r.updated_at) for r in recents
+        DashboardRecentItem(id=r.user_resume_id, title=r.title, updated_at=r.updated_at) for r in recents
     ]
     templates = db.query(Template).order_by(Template.created_at.desc()).limit(4).all()
     suggested = [{"id": t.id, "name": t.name, "slug": t.slug, "preview_url": t.preview_url, "is_premium": t.is_premium} for t in templates]

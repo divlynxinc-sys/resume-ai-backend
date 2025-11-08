@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from app.routers.user_routes import router as user_router
 from app.routers.auth import router as auth_router
 from app.routers.profile import router as profile_router
 from app.routers.admin import router as admin_router
@@ -7,8 +6,15 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.resumes import router as resumes_router
 from app.routers.templates import router as templates_router
 from app.middleware.session import UserSessionMiddleware
+from app.core.swagger import setup_swagger
 
-app = FastAPI(title="ResumeAI Backend")
+app = FastAPI(
+    title="ResumeAI Backend",
+    version="1.0.0",
+    description="Backend APIs for the AI-powered resume builder.",
+)
+
+setup_swagger(app)
 
 app.add_middleware(
     UserSessionMiddleware,
@@ -25,7 +31,6 @@ app.include_router(admin_router)
 app.include_router(dashboard_router)
 app.include_router(resumes_router)
 app.include_router(templates_router)
-app.include_router(user_router)
 
 @app.get("/")
 def root():
