@@ -1,23 +1,20 @@
-# 🧠 Resume AI Backend
+# 🧠 ResumeAI Backend
 
-Resumen AI helps users create professional resumes from scratch or enhance existing ones using AI.  
-This backend is built with **FastAPI** and **PostgreSQL** for scalability and performance.
+FastAPI + PostgreSQL backend for an AI resume builder. Includes JWT auth (access + refresh), RBAC, per-user resume IDs, dashboard summary, session logging, and sectioned resume editing APIs.
 
 ---
 
 ## 🚀 Tech Stack
-
-- **Framework:** FastAPI
-- **Database:** PostgreSQL (cloud - TBD)
-- **ORM:** SQLAlchemy + Alembic
-- **Auth:** JWT (coming soon)
-- **Deployment:** Docker / Render / Railway (TBD)
+- FastAPI + Starlette
+- SQLAlchemy 2.x + Alembic
+- PostgreSQL
+- JWT (python-jose) + Passlib (PBKDF2-SHA256)
 
 ---
 
-## ⚙️ Installation
+## ⚙️ Setup (Windows PowerShell)
 
-### 1. Clone the repository
+1) Installation
 
 ```bash
 git clone https://github.com/yourusername/resumen-ai-backend.git
@@ -31,21 +28,124 @@ venv\Scripts\activate # for windows
 pip install -r requirements.txt
 ```
 
-### Skip the database part for now. It is under review (not finalised)
-
-Create a .env file in the root folder:
-DATABASE_URL=postgresql://postgres:password@localhost/resumen_ai
-SECRET_KEY=your_secret_key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-### --------------------------------------------------------------------
-
-### Run the Server
-
+2) Env configuration
+- The app auto-loads `.envs/.env.<APP_ENV>` then `.env`. OS envs take precedence.
+- Recommended local file: create `.envs/.env.local`:
 ```bash
+APP_ENV=local
+DB_NAME=resume_ai
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_HOST=localhost
+DB_PORT=5432
+JWT_SECRET_KEY=dev-super-secret-key
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_MINUTES=43200
+```
+
+3) Start PostgreSQL and create DB (choose one)
+- Local PG service → create DB:
+```powershell
+psql -h localhost -U postgres -c "CREATE DATABASE resume_ai;"
+```
+- Or Docker:
+```powershell
+docker run -d --name resumeai-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+psql -h localhost -U postgres -c "CREATE DATABASE resume_ai;"
+```
+
+4) Migrations
+```powershell
+$env:APP_ENV="local"
+python -m alembic upgrade head
+```
+
+5) Run
+```powershell
 uvicorn app.main:app --reload
 ```
+- Swagger UI: `http://127.0.0.1:8000/docs`
+- ReDoc: `http://127.0.0.1:8000/redoc`
+
+Authorize in Swagger: click “Authorize”, paste only the access token (no “Bearer ”).
+
+---
+
+## 🔐 Auth Quickstart
+1) Signup
+```http
+POST /auth/signup
+{ "name": "Alex", "email": "alex@example.com", "password": "SecurePass123!" }
+```
+2) Login → get access_token + refresh_token
+```http
+POST /auth/login
+{ "email": "alex@example.com", "password": "SecurePass123!" }
+```
+3) Refresh
+```http
+POST /auth/refresh
+{ "refresh_token": "<REFRESH_TOKEN>" }
+```
+
+---
+
+## 📄 Resumes and Dashboard
+- Per-user IDs: every resume has a local `id` that starts at 1 for each user.
+- Create:
+```http
+POST /resumes?mode=scratch
+{ "title": "My Resume" }
+```
+- List:
+```http
+GET /resumes?limit=10&offset=0
+```
+- Section updates (raw JSON bodies):
+```http
+PATCH /resumes/{id}/content?section=info
+{ "full_name":"Alex Doe","email":"alex@example.com","phone":"+1 555 555" }
+```
+- Dashboard recents:
+```http
+GET /dashboard/summary
+```
+
+---
+
+## 🧭 Swagger tags
+- Auth, Profile, Admin, Dashboard, Resumes, Templates
+
+---
+
+## 🧪 Postman
+Recommended environment vars:
+- `base_url=http://127.0.0.1:8000`
+- `access_token`, `refresh_token`
+
+---
+
+## 🧱 Migrations in Git
+Commit `alembic/versions/*.py`, `alembic/env.py`, `alembic.ini`. On new envs run:
+```powershell
+python -m alembic upgrade head
+```
+
+---
+
+## 🤝 Contributing
+- Create feature branches; open PRs.
+- Don’t commit `.env*`, `.venv`, `__pycache__`.
+
+---
+
+## 🩺 Troubleshooting
+- “alembic not recognized”: use `python -m alembic ...`.
+- “driver://” in alembic: we override from env automatically.
+- bcrypt errors: we use PBKDF2-SHA256 (passlib) by default.
+
+Deactivate venv: `deactivate`
 
 ### Project Structure
 
@@ -99,5 +199,3 @@ resumen-ai-backend/
 ### For swagger, add "/docs" in the url e.g : http://127.0.0.1:8000/docs#/
 
 #
-
-### To deactivate the VENV (Virtual ENVironment) run this command in terminal : deactivate
