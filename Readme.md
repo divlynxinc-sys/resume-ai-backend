@@ -115,7 +115,27 @@ GET /dashboard/summary
 ---
 
 ## 🧭 Swagger tags
-- Auth, Profile, Admin, Dashboard, Resumes, Templates
+- Auth, Profile, Admin, Dashboard, Resumes, Templates, Pricing, Settings
+
+---
+
+## 📋 Feature API Reference
+
+| Feature | Endpoint | Description |
+|---------|----------|-------------|
+| **My Resumes** | `GET /resumes` | List resumes created by current user |
+| **Pricing** | `GET /pricing/plans` | Public list of pricing plans |
+| **Pricing (Admin CRUD)** | `GET/POST/PATCH/DELETE /pricing/admin/plans` | Customizable plans |
+| **Choose Plan** | `POST /pricing/plans/{id}/choose` | User selects a plan |
+| **Templates** | `GET /templates?style=&industry=` | List with Style/Industry filters |
+| **Recent Activity** | `GET /dashboard/recent-activity` | Last edited resumes |
+| **Profile** | `GET /profile/me`, `PATCH /profile/me` | User CRUD (name, phone, location, linkedin, portfolio) |
+| **Sync from Resume** | `POST /profile/sync-from-resume/{id}` | Copy resume info → profile |
+| **Logout** | `POST /auth/logout-all` | Revoke all sessions |
+| **Settings** | `GET/PATCH /settings/preferences` | Theme, notifications, 2FA |
+| **Account Summary** | `GET /settings/account/summary` | Plan, credits |
+| **Export Data** | `GET /settings/account/export` | Download all user data as JSON |
+| **Delete Account** | `DELETE /settings/account` | Soft delete account |
 
 ---
 

@@ -38,7 +38,7 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenPair)
 def login(payload: UserLogin, db: Session = Depends(get_db)):
     email_normalized = payload.email.lower()
-    user = db.query(User).filter(User.email == email_normalized).first()
+    user = db.query(User).filter(User.email == email_normalized, User.is_deleted == False).first()  # noqa: E712
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     if not verify_password(payload.password, user.password_hash):
@@ -68,7 +68,7 @@ def refresh_tokens(data: TokenRefresh, db: Session = Depends(get_db)):
         user_id_int = int(user_id)
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    user = db.query(User).filter(User.id == user_id_int).first()
+    user = db.query(User).filter(User.id == user_id_int, User.is_deleted == False).first()  # noqa: E712
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     if int(user.token_version or 1) != token_version:

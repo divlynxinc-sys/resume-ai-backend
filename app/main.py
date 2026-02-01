@@ -5,6 +5,8 @@ from app.routers.admin import router as admin_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.resumes import router as resumes_router
 from app.routers.templates import router as templates_router
+from app.routers.pricing import router as pricing_router
+from app.routers.settings import router as settings_router
 from app.middleware.session import UserSessionMiddleware
 from app.core.swagger import setup_swagger
 
@@ -31,6 +33,8 @@ app.include_router(admin_router)
 app.include_router(dashboard_router)
 app.include_router(resumes_router)
 app.include_router(templates_router)
+app.include_router(pricing_router)
+app.include_router(settings_router)
 
 @app.get("/")
 def root():

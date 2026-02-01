@@ -25,7 +25,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         user_id_int = int(user_id)
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication credentials")
-    user = db.query(User).filter(User.id == user_id_int).first()
+    user = db.query(User).filter(User.id == user_id_int, User.is_deleted == False).first()  # noqa: E712
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     if int(user.token_version or 1) != token_version:

@@ -39,3 +39,20 @@ def get_summary(db: Session = Depends(get_db), user: User = Depends(require_role
         suggested_templates=suggested,
     )
 
+
+@router.get("/recent-activity", response_model=List[DashboardRecentItem])
+def get_recent_activity(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Roles.user, Roles.admin)),
+):
+    """Recent activity - resumes last edited by the user. Same data as dashboard recent, dedicated endpoint."""
+    recents = (
+        db.query(Resume)
+        .filter(Resume.user_id == user.id, Resume.is_deleted == False)  # noqa: E712
+        .order_by(Resume.updated_at.desc())
+        .limit(min(limit, 50))
+        .all()
+    )
+    return [DashboardRecentItem(id=r.user_resume_id, title=r.title, updated_at=r.updated_at) for r in recents]
+

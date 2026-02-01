@@ -31,8 +31,17 @@ class UserPublic(BaseModel):
     name: str
     email: str
     role: str = "user"
+    phone: str | None = None
+    location: str | None = None
+    linkedin_url: str | None = None
+    portfolio_url: str | None = None
+    credits_remaining: int = 0
 
 
 class ProfileUpdate(BaseModel):
     name: str | None = None
     password: str | None = None
+    phone: str | None = None
+    location: str | None = None
+    linkedin_url: str | None = None
+    portfolio_url: str | None = None
