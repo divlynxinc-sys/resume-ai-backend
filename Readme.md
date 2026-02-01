@@ -154,6 +154,13 @@ GET /dashboard/summary
 
 ---
 
+## 📘 API Documentation (Frontend Integration)
+Full API reference for frontend developers: **[docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md)**
+
+Includes: authentication, all endpoints with request/response examples, data models, error handling, and integration workflows.
+
+---
+
 ## 🧪 Postman
 Import the collection and environment from `postman/`:
 - **Collection:** `postman/ResumeAI-Backend.postman_collection.json`
