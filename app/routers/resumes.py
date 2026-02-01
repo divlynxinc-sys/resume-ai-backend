@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -108,6 +109,9 @@ def create_resume_from_upload(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Parse error: {str(e)}")
 
+    # Ensure content is JSON-serializable for DB storage
+    content_to_store = json.loads(json.dumps(parsed, default=str)) if parsed else {}
+
     resume_title = title or (file.filename.rsplit(".", 1)[0] if "." in file.filename else file.filename)
     now = datetime.now(timezone.utc)
     next_local_id = (db.query(func.coalesce(func.max(Resume.user_resume_id), 0)).filter(Resume.user_id == user.id).scalar() or 0) + 1
@@ -117,11 +121,12 @@ def create_resume_from_upload(
         title=resume_title,
         template_id=template_id,
         status="draft",
-        content=parsed,
+        content=content_to_store,
         created_at=now,
         updated_at=now,
     )
     db.add(instance)
+    db.flush()
     db.commit()
     db.refresh(instance)
     return ResumeDetail(
@@ -135,19 +140,22 @@ def create_resume_from_upload(
     )
 
 
-@router.get("", response_model=List[ResumeItem])
+@router.get("")
 def list_resumes(
     q: Optional[str] = Query(default=None, description="Search in title"),
-    limit: int = Query(default=10, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100, description="Max items to return"),
+    offset: int = Query(default=0, ge=0, description="Skip first N items"),
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
+    """List resumes. Use limit/offset for pagination. Returns items + total_count."""
     query = db.query(Resume).filter(Resume.user_id == user.id, Resume.is_deleted == False)  # noqa: E712
     if q:
         query = query.filter(Resume.title.ilike(f"%{q}%"))
+    total_count = query.count()
     rows = query.order_by(Resume.updated_at.desc()).limit(limit).offset(offset).all()
-    return [ResumeItem(id=r.user_resume_id, title=r.title, updated_at=r.updated_at, status=r.status) for r in rows]
+    items = [ResumeItem(id=r.user_resume_id, title=r.title, updated_at=r.updated_at, status=r.status) for r in rows]
+    return {"items": items, "total": total_count}
 
 
 def _get_owned_resume(db: Session, user_id: int, resume_id: int) -> Resume:
@@ -351,7 +359,7 @@ def patch_content(
     r.updated_at = datetime.now(timezone.utc)
     db.add(r)
     db.commit()
-    return {"message": "Updated", "section": section.value}
+    return {"message": "Updated", "section": section.value, "content": content[section.value]}
 
 
 @router.post("/{resume_id}/ats-score", response_model=ATSScoreResponse, status_code=status.HTTP_201_CREATED)

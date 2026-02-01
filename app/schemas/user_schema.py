@@ -40,8 +40,13 @@ class UserPublic(BaseModel):
 
 class ProfileUpdate(BaseModel):
     name: str | None = None
-    password: str | None = None
     phone: str | None = None
     location: str | None = None
     linkedin_url: str | None = None
     portfolio_url: str | None = None
+
+
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str
+    confirm_password: str

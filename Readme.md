@@ -98,9 +98,9 @@ POST /auth/refresh
 POST /resumes?mode=scratch
 { "title": "My Resume" }
 ```
-- List:
+- List (returns `{items, total}`):
 ```http
-GET /resumes?limit=10&offset=0
+GET /resumes?limit=50&offset=0
 ```
 - Section updates (raw JSON bodies):
 ```http
@@ -132,7 +132,8 @@ GET /dashboard/summary
 | **Choose Plan** | `POST /pricing/plans/{id}/choose` | User selects a plan |
 | **Templates** | `GET /templates?style=&industry=` | List with Style/Industry filters |
 | **Recent Activity** | `GET /dashboard/recent-activity` | Last edited resumes |
-| **Profile** | `GET /profile/me`, `PATCH /profile/me` | User CRUD (name, phone, location, linkedin, portfolio) |
+| **Profile** | `GET /profile/me`, `PATCH /profile/me` | User CRUD – returns updated profile |
+| **Change Password** | `POST /profile/change-password` | Requires old_password, new_password, confirm_password |
 | **Sync from Resume** | `POST /profile/sync-from-resume/{id}` | Copy resume info → profile |
 | **Logout** | `POST /auth/logout-all` | Revoke all sessions |
 | **Settings** | `GET/PATCH /settings/preferences` | Theme, notifications, 2FA |

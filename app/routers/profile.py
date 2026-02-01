@@ -6,8 +6,8 @@ from app.core.security import get_current_user, require_roles
 from app.database.connection import get_db
 from app.models.resume import Resume
 from app.models.user import User
-from app.schemas.user_schema import ProfileUpdate, UserPublic
-from app.utils.auth_utils import hash_password
+from app.schemas.user_schema import PasswordChange, ProfileUpdate, UserPublic
+from app.utils.auth_utils import hash_password, verify_password
 
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
@@ -28,13 +28,10 @@ def get_me(user: User = Depends(require_roles(Roles.user, Roles.admin))):
     )
 
 
-@router.patch("/me")
+@router.patch("/me", response_model=UserPublic)
 def update_me(payload: ProfileUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if payload.name is not None:
         user.name = payload.name
-    if payload.password is not None and payload.password.strip():
-        user.password_hash = hash_password(payload.password)
-        user.token_version = int(user.token_version or 1) + 1
     if payload.phone is not None:
         user.phone = payload.phone or None
     if payload.location is not None:
@@ -45,10 +42,52 @@ def update_me(payload: ProfileUpdate, db: Session = Depends(get_db), user: User 
         user.portfolio_url = payload.portfolio_url or None
     db.add(user)
     db.commit()
-    return {"message": "Profile updated"}
+    db.refresh(user)
+    return UserPublic(
+        id=str(user.id),
+        name=user.name,
+        email=user.email,
+        role=user.role or Roles.user,
+        phone=user.phone,
+        location=user.location,
+        linkedin_url=user.linkedin_url,
+        portfolio_url=user.portfolio_url,
+        credits_remaining=int(user.credits_remaining or 0),
+    )
 
 
-@router.post("/sync-from-resume/{resume_id}")
+@router.post("/change-password", response_model=UserPublic)
+def change_password(
+    payload: PasswordChange,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Change password. Requires old password and new password confirmation."""
+    if not verify_password(payload.old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="New password and confirmation do not match")
+    if len(payload.new_password.strip()) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    user.password_hash = hash_password(payload.new_password)
+    user.token_version = int(user.token_version or 1) + 1
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return UserPublic(
+        id=str(user.id),
+        name=user.name,
+        email=user.email,
+        role=user.role or Roles.user,
+        phone=user.phone,
+        location=user.location,
+        linkedin_url=user.linkedin_url,
+        portfolio_url=user.portfolio_url,
+        credits_remaining=int(user.credits_remaining or 0),
+    )
+
+
+@router.post("/sync-from-resume/{resume_id}", response_model=UserPublic)
 def sync_profile_from_resume(
     resume_id: int,
     db: Session = Depends(get_db),
@@ -78,5 +117,16 @@ def sync_profile_from_resume(
             user.portfolio_url = info.get("portfolio_url") or None
         db.add(user)
         db.commit()
-    return {"message": "Profile synced from resume"}
+    db.refresh(user)
+    return UserPublic(
+        id=str(user.id),
+        name=user.name,
+        email=user.email,
+        role=user.role or Roles.user,
+        phone=user.phone,
+        location=user.location,
+        linkedin_url=user.linkedin_url,
+        portfolio_url=user.portfolio_url,
+        credits_remaining=int(user.credits_remaining or 0),
+    )
 

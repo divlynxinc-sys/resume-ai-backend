@@ -139,15 +139,15 @@
 					}
 				},
 				{
-					"name": "Update Password",
+					"name": "Change Password",
 					"request": {
-						"method": "PATCH",
+						"method": "POST",
 						"header": [{"key": "Content-Type", "value": "application/json"}],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"password\": \"NewSecurePass456!\"\n}"
+							"raw": "{\n  \"old_password\": \"SecurePass123!\",\n  \"new_password\": \"NewSecurePass456!\",\n  \"confirm_password\": \"NewSecurePass456!\"\n}"
 						},
-						"url": "{{base_url}}/profile/me"
+						"url": "{{base_url}}/profile/change-password"
 					}
 				},
 				{
@@ -218,11 +218,11 @@
 					"request": {
 						"method": "GET",
 						"url": {
-							"raw": "{{base_url}}/resumes?limit=10&offset=0&q=",
+							"raw": "{{base_url}}/resumes?limit=50&offset=0",
 							"host": ["{{base_url}}"],
 							"path": ["resumes"],
 							"query": [
-								{"key": "limit", "value": "10"},
+								{"key": "limit", "value": "50"},
 								{"key": "offset", "value": "0"},
 								{"key": "q", "value": "", "disabled": true}
 							]

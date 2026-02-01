@@ -77,7 +77,7 @@ def _split_sections(text: str) -> dict[str, str]:
         r"^(?:PROFESSIONAL\s+)?SUMMARY|^(?:EXECUTIVE\s+)?PROFILE|^OBJECTIVE",
         r"^(?:WORK\s+)?EXPERIENCE|^EMPLOYMENT|^PROFESSIONAL\s+EXPERIENCE|^EXPERIENCE",
         r"^EDUCATION|^ACADEMIC",
-        r"^SKILLS|^TECHNICAL\s+SKILLS|^CORE\s+COMPETENCIES",
+        r"^SKILLS?|^TECHNICAL\s+SKILLS|^KEY\s+SKILLS|^CORE\s+COMPETENCIES|^COMPETENCIES|^EXPERTISE|^AREAS?\s+OF\s+EXPERTISE|^TECHNOLOGIES|^TOOLS|^LANGUAGES",
         r"^PROJECTS",
         r"^CERTIFICATIONS|^CERTIFICATES",
         r"^AWARDS|^HONORS",
@@ -172,10 +172,50 @@ def _parse_education_block(block: str) -> list[dict[str, Any]]:
 
 
 def _parse_skills_block(block: str) -> list[str]:
-    """Extract skills from text (comma, pipe, or bullet separated)."""
-    text = block.replace("\n", " ").replace("•", ",").replace("|", ",")
-    skills = [s.strip() for s in re.split(r"[,;]", text) if s.strip() and len(s.strip()) < 50]
-    return skills[:50]
+    """Extract skills from text. Handles: bullets, commas, pipes, semicolons, newlines, colons."""
+    seen: set[str] = set()
+    skills: list[str] = []
+
+    def add_skill(s: str) -> None:
+        s = s.strip()
+        if not s or len(s) < 2 or len(s) > 60:
+            return
+        # Skip headers, dates, descriptions
+        if re.match(r"^(years?|proficient|expert|beginner|intermediate)$", s, re.I):
+            return
+        if re.search(r"\d{4}|\d+\s*years?", s):
+            return
+        s_clean = s.strip("•\-–—·").strip()
+        if s_clean and s_clean.lower() not in seen:
+            seen.add(s_clean.lower())
+            skills.append(s_clean)
+
+    # Split by newlines first - each line may have multiple skills
+    lines = [l.strip() for l in block.split("\n") if l.strip()]
+
+    for line in lines:
+        # Skip section-like headers (short caps lines)
+        if len(line) < 30 and re.match(r"^[A-Z\s]+$", line):
+            continue
+        # Handle "Category: skill1, skill2" or "Category - skill1, skill2"
+        if ":" in line:
+            parts = line.split(":", 1)
+            if len(parts) == 2 and len(parts[0]) < 40:
+                line = parts[1]  # take content after category
+        if " - " in line and len(line.split(" - ")[0]) < 25:
+            line = " - ".join(line.split(" - ")[1:])  # drop category prefix
+
+        # Split by comma, pipe, semicolon, bullet
+        for chunk in re.split(r"[,;|]|\s*[•\-–—·]\s*", line):
+            add_skill(chunk)
+
+    # Also try whole-block: comma/pipe/semicolon separated on same line
+    if not skills:
+        flat = block.replace("\n", ",").replace("•", ",").replace("|", ",").replace(";", ",")
+        for s in re.split(r",", flat):
+            add_skill(s)
+
+    return skills[:80]
 
 
 def _guess_name_from_text(text: str) -> str:
@@ -190,6 +230,8 @@ def _guess_name_from_text(text: str) -> str:
 
 def parse_resume_content(text: str, filename: str = "") -> dict:
     """Parse raw resume text into ResumeContent-compatible dict."""
+    text = re.sub(r"[ \t]+", " ", text)  # normalize spaces
+    text = re.sub(r"\n{3,}", "\n\n", text)  # collapse excess newlines
     text = text.strip()
     if not text:
         return ResumeContent().model_dump()
@@ -229,10 +271,26 @@ def parse_resume_content(text: str, filename: str = "") -> dict:
             break
 
     skills: list[str] = []
+    skill_keys = ("SKILL", "COMPETENC", "EXPERTISE", "TECHNOLOG", "TOOLS", "LANGUAGES")
     for key in sections:
-        if "SKILL" in key.upper():
-            skills = _parse_skills_block(sections[key])
-            break
+        k = key.upper()
+        if any(sk in k for sk in skill_keys):
+            parsed = _parse_skills_block(sections[key])
+            if parsed:
+                skills = parsed
+                break
+
+    # Fallback: if section split missed it, search for Skills heading + following content
+    if not skills:
+        for pattern in [
+            r"(?:SKILLS?|TECHNICAL\s+SKILLS|KEY\s+SKILLS|EXPERTISE|TECHNOLOGIES)[\s:]*\n([^\n]+(?:\n[^\n]+){0,50})",
+            r"(?:SKILLS?|TECHNICAL\s+SKILLS)[\s:]*([\s\S]{20,2000}?)(?=\n\n[A-Z]|\n(?:EXPERIENCE|EDUCATION|PROJECTS)|\Z)",
+        ]:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                skills = _parse_skills_block(m.group(1).strip())
+                if skills:
+                    break
 
     summary = ""
     for key in sections:

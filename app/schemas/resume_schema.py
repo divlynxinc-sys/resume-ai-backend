@@ -84,9 +84,11 @@ class ResumeDetail(BaseModel):
     title: str
     template_id: Optional[int] = None
     status: str
-    content: Optional[ResumeContent] = None
+    content: Optional[dict] = None  # Raw content from DB (info, experience, education, skills, etc.)
     created_at: datetime
     updated_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class SectionUpdate(BaseModel):
