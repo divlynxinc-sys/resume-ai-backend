@@ -26,6 +26,7 @@ from app.models import pricing_plan as pricing_plan_model  # ensure model is imp
 from app.models import user_settings as user_settings_model  # ensure model is imported
 from app.models import help_article as help_article_model  # ensure model is imported
 from app.models import ats_score as ats_score_model  # ensure model is imported
+from app.models import juno_prompt as juno_prompt_model  # ensure model is imported
 
 target_metadata = Base.metadata
 

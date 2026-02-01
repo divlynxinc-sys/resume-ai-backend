@@ -115,7 +115,7 @@ GET /dashboard/summary
 ---
 
 ## 🧭 Swagger tags
-- Auth, Profile, Admin, Dashboard, Resumes, Templates, Pricing, Settings, Help Center
+- Auth, Profile, Admin, Dashboard, Resumes, Templates, Pricing, Settings, Help Center, Juno AI Assistant
 
 ---
 
@@ -124,6 +124,9 @@ GET /dashboard/summary
 | Feature | Endpoint | Description |
 |---------|----------|-------------|
 | **My Resumes** | `GET /resumes` | List resumes created by current user |
+| **Upload (new)** | `POST /resumes/from-upload` | Upload PDF/DOCX, create resume with parsed data |
+| **Upload (existing)** | `PATCH /resumes/{id}/from-upload` | Upload PDF/DOCX, merge into existing resume |
+| **Parse Preview** | `POST /resumes/parse-upload` | Parse file, return content without saving |
 | **Pricing** | `GET /pricing/plans` | Public list of pricing plans |
 | **Pricing (Admin CRUD)** | `GET/POST/PATCH/DELETE /pricing/admin/plans` | Customizable plans |
 | **Choose Plan** | `POST /pricing/plans/{id}/choose` | User selects a plan |
@@ -145,13 +148,20 @@ GET /dashboard/summary
 | **Help Admin** | `GET/POST/PATCH/DELETE /help/admin/articles` | Articles CRUD |
 | **ATS Score (save)** | `POST /resumes/{id}/ats-score` | Store ATS data from AI |
 | **ATS Score (get)** | `GET /resumes/{id}/ats-score` | Get latest ATS score |
+| **Juno - Example Prompts** | `GET /juno/prompts` | List example prompts for AI assistant |
+| **Juno Admin CRUD** | `GET/POST/PATCH/DELETE /juno/admin/prompts` | Manage example prompts |
 
 ---
 
 ## 🧪 Postman
-Recommended environment vars:
-- `base_url=http://127.0.0.1:8000`
-- `access_token`, `refresh_token`
+Import the collection and environment from `postman/`:
+- **Collection:** `postman/ResumeAI-Backend.postman_collection.json`
+- **Environment:** `postman/ResumeAI-Local.postman_environment.json` (optional)
+
+1. Import the collection → File → Import → select the `.postman_collection.json`
+2. (Optional) Import the environment and select it in the top-right dropdown
+3. Run **Auth → Login** to get tokens (auto-saved to collection variables)
+4. Variables: `base_url`, `access_token`, `refresh_token`, `resume_id`
 
 ---
 
