@@ -10,7 +10,9 @@ from app.core.security import require_roles, get_current_user
 from app.database.connection import get_db
 from app.models.resume import Resume
 from app.models.user import User
+from app.models.ats_score import ResumeATSScore
 from app.schemas.resume_schema import ResumeCreate, ResumeDetail, ResumeItem, ResumeUpdate, ResumeSection, ResumeContent
+from app.schemas.ats_schema import ATSScorePayload, ATSScoreResponse
 
 router = APIRouter(prefix="/resumes", tags=["Resumes"])
 
@@ -211,6 +213,66 @@ def patch_content(
     db.add(r)
     db.commit()
     return {"message": "Updated", "section": section.value}
+
+
+@router.post("/{resume_id}/ats-score", response_model=ATSScoreResponse, status_code=status.HTTP_201_CREATED)
+def save_ats_score(
+    resume_id: int,
+    payload: ATSScorePayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Store ATS score data from AI. AI service sends the payload after analysis."""
+    r = _get_owned_resume(db, user.id, resume_id)
+    score = ResumeATSScore(
+        resume_id=r.id,
+        user_id=user.id,
+        overall_score=payload.overall_score,
+        max_score=payload.max_score,
+        category_scores=payload.category_scores,
+        recommendations=payload.recommendations,
+    )
+    db.add(score)
+    db.commit()
+    db.refresh(score)
+    return ATSScoreResponse(
+        id=score.id,
+        resume_id=r.user_resume_id,
+        overall_score=score.overall_score,
+        max_score=score.max_score,
+        category_scores=score.category_scores,
+        recommendations=score.recommendations,
+        analyzed_at=score.analyzed_at,
+        created_at=score.created_at,
+    )
+
+
+@router.get("/{resume_id}/ats-score", response_model=Optional[ATSScoreResponse])
+def get_ats_score(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get latest ATS score for the resume (from AI analysis)."""
+    r = _get_owned_resume(db, user.id, resume_id)
+    score = (
+        db.query(ResumeATSScore)
+        .filter(ResumeATSScore.resume_id == r.id, ResumeATSScore.user_id == user.id)
+        .order_by(ResumeATSScore.analyzed_at.desc())
+        .first()
+    )
+    if not score:
+        return None
+    return ATSScoreResponse(
+        id=score.id,
+        resume_id=r.user_resume_id,
+        overall_score=score.overall_score,
+        max_score=score.max_score,
+        category_scores=score.category_scores,
+        recommendations=score.recommendations,
+        analyzed_at=score.analyzed_at,
+        created_at=score.created_at,
+    )
 
 
 @router.get("/sections/definition")

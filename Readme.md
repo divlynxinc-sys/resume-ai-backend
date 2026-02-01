@@ -115,7 +115,7 @@ GET /dashboard/summary
 ---
 
 ## 🧭 Swagger tags
-- Auth, Profile, Admin, Dashboard, Resumes, Templates, Pricing, Settings
+- Auth, Profile, Admin, Dashboard, Resumes, Templates, Pricing, Settings, Help Center
 
 ---
 
@@ -136,6 +136,15 @@ GET /dashboard/summary
 | **Account Summary** | `GET /settings/account/summary` | Plan, credits |
 | **Export Data** | `GET /settings/account/export` | Download all user data as JSON |
 | **Delete Account** | `DELETE /settings/account` | Soft delete account |
+| **Help Center** | `GET /help/topics` | Browse by topic |
+| **Help Search** | `GET /help/articles?q=` | Search for answers |
+| **Featured Articles** | `GET /help/articles/featured` | Featured articles |
+| **FAQs** | `GET /help/articles/faqs` | FAQs list |
+| **Article Detail** | `GET /help/articles/{slug}` | Full article (Read More) |
+| **Help Admin** | `GET/POST/PATCH/DELETE /help/admin/topics` | Topics CRUD |
+| **Help Admin** | `GET/POST/PATCH/DELETE /help/admin/articles` | Articles CRUD |
+| **ATS Score (save)** | `POST /resumes/{id}/ats-score` | Store ATS data from AI |
+| **ATS Score (get)** | `GET /resumes/{id}/ats-score` | Get latest ATS score |
 
 ---
 
