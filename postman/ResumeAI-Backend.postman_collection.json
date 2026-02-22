@@ -1,0 +1,655 @@
+{
+	"info": {
+		"_postman_id": "resumeai-backend-001",
+		"name": "ResumeAI Backend",
+		"description": "Complete API collection for ResumeAI backend. Set `base_url` and `access_token` in collection or environment variables.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://127.0.0.1:8000"
+		},
+		{
+			"key": "access_token",
+			"value": ""
+		},
+		{
+			"key": "refresh_token",
+			"value": ""
+		},
+		{
+			"key": "resume_id",
+			"value": "1"
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{access_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Signup",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Alex Doe\",\n  \"email\": \"alex@example.com\",\n  \"password\": \"SecurePass123!\"\n}"
+						},
+						"url": "{{base_url}}/auth/signup"
+					}
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"  const json = pm.response.json();",
+									"  pm.collectionVariables.set('access_token', json.access_token);",
+									"  pm.collectionVariables.set('refresh_token', json.refresh_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"alex@example.com\",\n  \"password\": \"SecurePass123!\"\n}"
+						},
+						"url": "{{base_url}}/auth/login"
+					}
+				},
+				{
+					"name": "Refresh Tokens",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"  const json = pm.response.json();",
+									"  pm.collectionVariables.set('access_token', json.access_token);",
+									"  pm.collectionVariables.set('refresh_token', json.refresh_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+						},
+						"url": "{{base_url}}/auth/refresh"
+					}
+				},
+				{
+					"name": "Logout All",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"url": "{{base_url}}/auth/logout-all"
+					}
+				}
+			]
+		},
+		{
+			"name": "Profile",
+			"item": [
+				{
+					"name": "Get Profile (me)",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/profile/me"
+					}
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PATCH",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Alex Doe\",\n  \"phone\": \"+1 555 555 5555\",\n  \"location\": \"New York, NY\",\n  \"linkedin_url\": \"https://linkedin.com/in/alex\",\n  \"portfolio_url\": \"https://alex.dev\"\n}"
+						},
+						"url": "{{base_url}}/profile/me"
+					}
+				},
+				{
+					"name": "Change Password",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"old_password\": \"SecurePass123!\",\n  \"new_password\": \"NewSecurePass456!\",\n  \"confirm_password\": \"NewSecurePass456!\"\n}"
+						},
+						"url": "{{base_url}}/profile/change-password"
+					}
+				},
+				{
+					"name": "Sync Profile from Resume",
+					"request": {
+						"method": "POST",
+						"url": "{{base_url}}/profile/sync-from-resume/{{resume_id}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "Resumes",
+			"item": [
+				{
+					"name": "Create Resume",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"My Resume\"\n}"
+						},
+						"url": "{{base_url}}/resumes?mode=scratch"
+					}
+				},
+				{
+					"name": "Create from Upload (Start from scratch)",
+					"request": {
+						"method": "POST",
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{"key": "file", "type": "file", "src": ""}
+							]
+						},
+						"url": "{{base_url}}/resumes/from-upload"
+					}
+				},
+				{
+					"name": "Build from Upload (Build upon existing)",
+					"request": {
+						"method": "PATCH",
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{"key": "file", "type": "file", "src": ""}
+							]
+						},
+						"url": "{{base_url}}/resumes/{{resume_id}}/from-upload"
+					}
+				},
+				{
+					"name": "Parse Upload (Preview)",
+					"request": {
+						"method": "POST",
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{"key": "file", "type": "file", "src": ""}
+							]
+						},
+						"url": "{{base_url}}/resumes/parse-upload"
+					}
+				},
+				{
+					"name": "List Resumes",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/resumes?limit=50&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["resumes"],
+							"query": [
+								{"key": "limit", "value": "50"},
+								{"key": "offset", "value": "0"},
+								{"key": "q", "value": "", "disabled": true}
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Resume",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/resumes/{{resume_id}}"
+					}
+				},
+				{
+					"name": "Update Resume",
+					"request": {
+						"method": "PATCH",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Updated Resume Title\",\n  \"status\": \"draft\"\n}"
+						},
+						"url": "{{base_url}}/resumes/{{resume_id}}"
+					}
+				},
+				{
+					"name": "Duplicate Resume",
+					"request": {
+						"method": "POST",
+						"url": "{{base_url}}/resumes/{{resume_id}}/duplicate"
+					}
+				},
+				{
+					"name": "Delete Resume",
+					"request": {
+						"method": "DELETE",
+						"url": "{{base_url}}/resumes/{{resume_id}}"
+					}
+				},
+				{
+					"name": "Get Content",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/resumes/{{resume_id}}/content",
+							"host": ["{{base_url}}"],
+							"path": ["resumes", "{{resume_id}}", "content"],
+							"query": [
+								{"key": "section", "value": "info", "disabled": true, "description": "info|experience|education|skills|summary|job_description|custom"}
+							]
+						}
+					}
+				},
+				{
+					"name": "Patch Content (info)",
+					"request": {
+						"method": "PATCH",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"full_name\": \"Alex Doe\",\n  \"email\": \"alex@example.com\",\n  \"phone\": \"+1 555 555 5555\",\n  \"location\": \"New York, NY\",\n  \"linkedin_url\": \"https://linkedin.com/in/alex\",\n  \"portfolio_url\": \"https://alex.dev\"\n}"
+						},
+						"url": "{{base_url}}/resumes/{{resume_id}}/content?section=info"
+					}
+				},
+				{
+					"name": "Patch Content (experience)",
+					"request": {
+						"method": "PATCH",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "[\n  {\n    \"role\": \"Software Engineer\",\n    \"company\": \"Acme Inc\",\n    \"start_date\": \"2020\",\n    \"end_date\": \"2024\",\n    \"description\": \"Built scalable systems.\"\n  }\n]"
+						},
+						"url": "{{base_url}}/resumes/{{resume_id}}/content?section=experience"
+					}
+				},
+				{
+					"name": "Patch Content (skills)",
+					"request": {
+						"method": "PATCH",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "[\"Python\", \"FastAPI\", \"PostgreSQL\", \"React\"]"
+						},
+						"url": "{{base_url}}/resumes/{{resume_id}}/content?section=skills"
+					}
+				},
+				{
+					"name": "Get Sections Definition",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/resumes/sections/definition?section=info"
+					}
+				},
+				{
+					"name": "Save ATS Score (from AI)",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"overall_score\": 86,\n  \"max_score\": 100,\n  \"category_scores\": {\n    \"keyword_match\": {\"label\": \"Keyword Match\", \"description\": \"Matched 41/50 role keywords.\", \"score\": 41, \"max\": 50},\n    \"contact_info\": {\"label\": \"Contact Info Completeness\", \"description\": \"Email, phone, LinkedIn present.\"},\n    \"readability\": {\"label\": \"Readability\", \"description\": \"Clear phrasing and action verbs.\"},\n    \"formatting\": {\"label\": \"Formatting & Structure\", \"description\": \"Consistent headings, bullet points, spacing.\"},\n    \"section_detection\": {\"label\": \"Section Detection\", \"description\": \"Experience, Education, Skills, Summary detected.\"},\n    \"ats_compatibility\": {\"label\": \"ATS Compatibility\", \"description\": \"Simple layout, parsable text.\"}\n  },\n  \"recommendations\": [\n    \"Add keyword \\\"Agile\\\" in Experience section\",\n    \"Consider a dedicated \\\"Skills\\\" header for better parsing\",\n    \"Replace images/icons with plain text for ATS\",\n    \"Use consistent date format (e.g., Jan 2022 - Present)\"\n  ]\n}"
+						},
+						"url": "{{base_url}}/resumes/{{resume_id}}/ats-score"
+					}
+				},
+				{
+					"name": "Get ATS Score",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/resumes/{{resume_id}}/ats-score"
+					}
+				}
+			]
+		},
+		{
+			"name": "Dashboard",
+			"item": [
+				{
+					"name": "Get Summary",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/dashboard/summary"
+					}
+				},
+				{
+					"name": "Get Recent Activity",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/dashboard/recent-activity?limit=10"
+					}
+				}
+			]
+		},
+		{
+			"name": "Templates",
+			"item": [
+				{
+					"name": "List Templates",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/templates?limit=12&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["templates"],
+							"query": [
+								{"key": "limit", "value": "12"},
+								{"key": "offset", "value": "0"},
+								{"key": "q", "value": "", "disabled": true},
+								{"key": "style", "value": "Modern", "disabled": true},
+								{"key": "industry", "value": "", "disabled": true}
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Pricing",
+			"item": [
+				{
+					"name": "List Plans",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "GET",
+						"url": "{{base_url}}/pricing/plans?active_only=true"
+					}
+				},
+				{
+					"name": "Choose Plan",
+					"request": {
+						"method": "POST",
+						"url": "{{base_url}}/pricing/plans/1/choose"
+					}
+				},
+				{
+					"name": "Admin - List Plans",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/pricing/admin/plans"
+					}
+				},
+				{
+					"name": "Admin - Create Plan",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Enterprise\",\n  \"slug\": \"enterprise\",\n  \"label\": \"Best Value\",\n  \"price\": 99.99,\n  \"credits\": 1000,\n  \"description\": \"For teams.\",\n  \"features\": [\"1000 AI Credits\", \"Team features\", \"Priority support\"],\n  \"is_popular\": false,\n  \"display_order\": 5\n}"
+						},
+						"url": "{{base_url}}/pricing/admin/plans"
+					}
+				},
+				{
+					"name": "Admin - Update Plan",
+					"request": {
+						"method": "PATCH",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"price\": 19.99,\n  \"description\": \"Updated description\"\n}"
+						},
+						"url": "{{base_url}}/pricing/admin/plans/1"
+					}
+				},
+				{
+					"name": "Admin - Delete Plan",
+					"request": {
+						"method": "DELETE",
+						"url": "{{base_url}}/pricing/admin/plans/5"
+					}
+				}
+			]
+		},
+		{
+			"name": "Settings",
+			"item": [
+				{
+					"name": "Get Preferences",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/settings/preferences"
+					}
+				},
+				{
+					"name": "Update Preferences",
+					"request": {
+						"method": "PATCH",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"dark_mode\": true,\n  \"accent_color\": \"blue\",\n  \"email_notifications\": true,\n  \"in_app_notifications\": true,\n  \"two_factor_enabled\": false\n}"
+						},
+						"url": "{{base_url}}/settings/preferences"
+					}
+				},
+				{
+					"name": "Get Account Summary",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/settings/account/summary"
+					}
+				},
+				{
+					"name": "Export Data",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/settings/account/export"
+					}
+				},
+				{
+					"name": "Delete Account",
+					"request": {
+						"method": "DELETE",
+						"url": "{{base_url}}/settings/account"
+					}
+				}
+			]
+		},
+		{
+			"name": "Help Center",
+			"item": [
+				{
+					"name": "List Topics",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/help/topics"
+					}
+				},
+				{
+					"name": "Search Articles",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/help/articles?q=resume&limit=20&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["help", "articles"],
+							"query": [
+								{"key": "q", "value": "resume"},
+								{"key": "limit", "value": "20"},
+								{"key": "offset", "value": "0"},
+								{"key": "topic_id", "value": "", "disabled": true},
+								{"key": "featured_only", "value": "false", "disabled": true},
+								{"key": "faq_only", "value": "false", "disabled": true}
+							]
+						}
+					}
+				},
+				{
+					"name": "Featured Articles",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/help/articles/featured?limit=10"
+					}
+				},
+				{
+					"name": "FAQs",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/help/articles/faqs?limit=20"
+					}
+				},
+				{
+					"name": "Get Article by Slug",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/help/articles/how-to-create-standout-resume"
+					}
+				},
+				{
+					"name": "Admin - List Topics",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/help/admin/topics"
+					}
+				},
+				{
+					"name": "Admin - Create Topic",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"API Guide\",\n  \"slug\": \"api-guide\",\n  \"description\": \"API documentation.\",\n  \"icon\": \"code\"\n}"
+						},
+						"url": "{{base_url}}/help/admin/topics"
+					}
+				},
+				{
+					"name": "Admin - List Articles",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/help/admin/articles?limit=50"
+					}
+				},
+				{
+					"name": "Admin - Create Article",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"topic_id\": 1,\n  \"title\": \"Getting started guide\",\n  \"slug\": \"getting-started-guide\",\n  \"excerpt\": \"Quick start for new users.\",\n  \"content\": \"Full article content here...\",\n  \"is_featured\": true,\n  \"is_faq\": true\n}"
+						},
+						"url": "{{base_url}}/help/admin/articles"
+					}
+				}
+			]
+		},
+		{
+			"name": "Juno AI Assistant",
+			"item": [
+				{
+					"name": "List Example Prompts",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/juno/prompts",
+							"host": ["{{base_url}}"],
+							"path": ["juno", "prompts"],
+							"query": [
+								{"key": "category", "value": "", "disabled": true, "description": "Filter by category: summary, experience, ats, etc."}
+							]
+						}
+					}
+				},
+				{
+					"name": "Admin - List Prompts",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/juno/admin/prompts"
+					}
+				},
+				{
+					"name": "Admin - Create Prompt",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"text\": \"Add industry-specific keywords to my resume\",\n  \"category\": \"ats\",\n  \"display_order\": 9,\n  \"is_active\": true\n}"
+						},
+						"url": "{{base_url}}/juno/admin/prompts"
+					}
+				},
+				{
+					"name": "Admin - Get Prompt",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/juno/admin/prompts/1"
+					}
+				},
+				{
+					"name": "Admin - Update Prompt",
+					"request": {
+						"method": "PATCH",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"text\": \"Make my summary more impactful\",\n  \"display_order\": 1\n}"
+						},
+						"url": "{{base_url}}/juno/admin/prompts/1"
+					}
+				},
+				{
+					"name": "Admin - Delete Prompt",
+					"request": {
+						"method": "DELETE",
+						"url": "{{base_url}}/juno/admin/prompts/9"
+					}
+				}
+			]
+		},
+		{
+			"name": "Admin",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/admin/health"
+					}
+				}
+			]
+		}
+	]
+}
