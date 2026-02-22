@@ -11,7 +11,7 @@ services:
 
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    preDeployCommand: python -m alembic upgrade head
+    # preDeployCommand not supported on free tier — run migrations once via Shell: python -m alembic upgrade head
 
     healthCheckPath: /
 
