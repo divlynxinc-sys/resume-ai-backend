@@ -1,4 +1,10 @@
+import os
+import subprocess
+import sys
+
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
+
 from app.routers.auth import router as auth_router
 from app.routers.profile import router as profile_router
 from app.routers.admin import router as admin_router
@@ -12,10 +18,24 @@ from app.routers.juno import router as juno_router
 from app.middleware.session import UserSessionMiddleware
 from app.core.swagger import setup_swagger
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Run DB migrations on startup (enables free-tier deploys where Shell/Release Command aren't available)
+    if os.getenv("RUN_MIGRATIONS_ON_STARTUP", "true").lower() in ("1", "true", "yes"):
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            check=True,
+            capture_output=False,
+        )
+    yield
+
+
 app = FastAPI(
     title="ResumeAI Backend",
     version="1.0.0",
     description="Backend APIs for the AI-powered resume builder.",
+    lifespan=lifespan,
 )
 
 setup_swagger(app)
