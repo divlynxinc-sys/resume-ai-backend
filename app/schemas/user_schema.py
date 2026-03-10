@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr
 
+
 class UserCreate(BaseModel):
     name: str
     email: EmailStr
@@ -9,6 +10,21 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+
+class OtpLoginStart(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class OtpVerifyRequest(BaseModel):
+    email: EmailStr
+    otp_code: str
+
+
+class OtpStartResponse(BaseModel):
+    message: str
+    otp_sent: bool = True
 
 
 class Token(BaseModel):

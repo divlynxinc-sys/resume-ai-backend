@@ -22,6 +22,9 @@ class User(Base):
     portfolio_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("pricing_plans.id", ondelete="SET NULL"), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # OTP login fields
+    otp_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
+    otp_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
