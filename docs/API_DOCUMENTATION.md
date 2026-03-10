@@ -904,3 +904,92 @@ interface ResumeContent {
 - **ReDoc:** `{base_url}/redoc`
 
 Both list all endpoints and allow testing.
+
+
+### Payment / Plans / Add‑ons
+
+- **GET `/pricing/plans`**  
+  - **Use**: List active plans (e.g. Free, Premium).
+
+- **POST `/pricing/plans/{plan_id}/choose`**  
+  - **Use**: User selects a plan.  
+  - **Auth**: required.  
+  - **Effect**: Sets `user.plan_id`, resets `credits_remaining` to plan’s base credits.
+
+- **GET `/settings/account/summary`**  
+  - **Use**: Get `current_plan` + `credits_remaining`.  
+  - **Auth**: required.
+
+- **GET `/pricing/plans/{plan_id}/addons`**  
+  - **Use**: Get add‑on bundles for the user’s active Premium plan (for popup UI).  
+  - **Auth**: required.  
+  - **Response**:  
+    - `plan_id`, `plan_slug`, `base_price_per_credit`  
+    - `options`: `[ { "credits": 10, "price": 6.67 }, { "credits": 15, ... }, { "credits": 20, ... } ]` (example numbers).
+
+- **POST `/pricing/plans/addons/purchase`**  
+  - **Use**: After successful payment, add add‑on credits.  
+  - **Auth**: required.  
+  - **Body**:
+    ```json
+    { "plan_id": 3, "credits": 15 }
+    ```
+  - **Response**:
+    ```json
+    {
+      "credits_added": 15,
+      "total_credits_after_purchase": 30,
+      "price_charged": 10.0,
+      "currency": "USD"
+    }
+    ```
+
+---
+
+### OTP Login Flow
+
+**Step 0 – optional (legacy login, no OTP):**
+
+- **POST `/auth/login`**  
+  - **Use**: Old flow; email + password → tokens directly (no OTP).
+
+**New OTP‑based flow:**
+
+1. **Step 1 – start OTP login**
+
+   - **POST `/auth/login/otp/start`**  
+     - **Body**:
+       ```json
+       {
+         "email": "user@example.com",
+         "password": "UserPass123!"
+       }
+       ```
+     - **Use**: Verify creds, generate 6‑digit OTP, send email, store OTP + expiry.  
+     - **Response**:
+       ```json
+       {
+         "message": "OTP sent to your email",
+         "otp_sent": true
+       }
+       ```
+
+2. **Step 2 – verify OTP and get tokens**
+
+   - **POST `/auth/login/otp/verify`**  
+     - **Body**:
+       ```json
+       {
+         "email": "user@example.com",
+         "otp_code": "123456"
+       }
+       ```
+     - **Use**: Validate OTP + expiry, then issue JWTs.  
+     - **Response** (same as normal login):
+       ```json
+       {
+         "access_token": "<JWT>",
+         "refresh_token": "<JWT>",
+         "token_type": "bearer"
+       }
+       ```
