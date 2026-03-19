@@ -11,6 +11,16 @@ import re
 from typing import Any, Dict, List, Tuple
 
 
+def _as_clean_str(value: Any, max_len: int = 2000) -> str:
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    s = re.sub(r"\s+", " ", s)
+    return s[:max_len]
+
+
 def _clean_bullets_from_description(description: Any) -> List[str]:
     if not description:
         return []
@@ -29,15 +39,22 @@ def _clean_bullets_from_description(description: Any) -> List[str]:
     return bullets
 
 
+def _compact_lines(text: str, max_chars: int = 4000) -> str:
+    if not text:
+        return ""
+    cleaned = "\n".join([ln.strip() for ln in str(text).splitlines() if ln.strip()])
+    return cleaned[:max_chars]
+
+
 def backend_content_to_ai_request(resume_content: Dict[str, Any]) -> Dict[str, Any]:
     info = resume_content.get("info") or {}
     job_description_obj = resume_content.get("job_description") or {}
     custom = resume_content.get("custom") or {}
 
-    job_title = (job_description_obj.get("job_title") or "").strip()
-    company = (job_description_obj.get("company") or "").strip()
-    location = (job_description_obj.get("location") or "").strip()
-    description = (job_description_obj.get("description") or "").strip()
+    job_title = _as_clean_str(job_description_obj.get("job_title"), 200)
+    company = _as_clean_str(job_description_obj.get("company"), 200)
+    location = _as_clean_str(job_description_obj.get("location"), 200)
+    description = _compact_lines(_as_clean_str(job_description_obj.get("description"), 8000), 8000)
 
     # `resumeai-AI` expects a single string.
     job_description_text = " ".join([p for p in [job_title, company] if p]).strip()
@@ -46,48 +63,84 @@ def backend_content_to_ai_request(resume_content: Dict[str, Any]) -> Dict[str, A
     if description:
         job_description_text = f"{job_description_text}\n\n{description}".strip() if job_description_text else description
 
-    name = (info.get("full_name") or " ").strip()
-    email = (info.get("email") or "").strip()
-    phone = (info.get("phone") or "").strip()
-    linkedin = (info.get("linkedin_url") or "").strip()
-    portfolio = (info.get("portfolio_url") or "").strip()
+    social_urls = resume_content.get("custom", {}).get("social_urls", {}) if isinstance(resume_content.get("custom"), dict) else {}
+    github_urls = social_urls.get("github") if isinstance(social_urls, dict) else []
+
+    name = _as_clean_str(info.get("full_name"), 200)
+    email = _as_clean_str(info.get("email"), 320)
+    phone = _as_clean_str(info.get("phone"), 80)
+    linkedin = _as_clean_str(info.get("linkedin_url"), 512)
+    portfolio = _as_clean_str(info.get("portfolio_url"), 512)
+    if not portfolio and isinstance(github_urls, list) and github_urls:
+        portfolio = _as_clean_str(github_urls[0], 512)
 
     experiences_in = resume_content.get("experience") or []
     experiences: List[Dict[str, Any]] = []
     for e in experiences_in:
         if not isinstance(e, dict):
             continue
+        role = _as_clean_str(e.get("role"), 200)
+        company_name = _as_clean_str(e.get("company"), 200)
+        location_val = _as_clean_str(e.get("location"), 120) or None
+        start_date = _as_clean_str(e.get("start_date"), 40)
+        end_date = _as_clean_str(e.get("end_date"), 40)
+        bullets = [b[:220] for b in _clean_bullets_from_description(e.get("description"))][:8]
+
+        # Skip fully empty rows; these create noise and long prompts.
+        if not (role or company_name or start_date or end_date or bullets):
+            continue
+
         experiences.append(
             {
-                "role": (e.get("role") or "").strip(),
-                "company": (e.get("company") or "").strip(),
-                "location": e.get("location"),
-                "startDate": (e.get("start_date") or "").strip(),
-                "endDate": (e.get("end_date") or "").strip(),
-                "bullets": _clean_bullets_from_description(e.get("description")),
+                "role": role,
+                "company": company_name,
+                "location": location_val,
+                "startDate": start_date,
+                "endDate": end_date,
+                "bullets": bullets,
             }
         )
+    experiences = experiences[:25]
 
     education_in = resume_content.get("education") or []
     education: List[Dict[str, Any]] = []
     for ed in education_in:
         if not isinstance(ed, dict):
             continue
+        school = _as_clean_str(ed.get("school"), 200)
+        degree = _as_clean_str(ed.get("degree"), 200)
+        field = _as_clean_str(ed.get("field_of_study"), 120)
+        location_val = _as_clean_str(ed.get("location"), 120) or None
+        end_date = _as_clean_str(ed.get("end_date"), 40)
+
+        if not (school or degree or field or end_date):
+            continue
         education.append(
             {
-                "school": (ed.get("school") or "").strip(),
-                "degree": (ed.get("degree") or "").strip(),
-                "field": (ed.get("field_of_study") or "").strip(),
-                "location": ed.get("location"),
-                "endDate": (ed.get("end_date") or "").strip(),
+                "school": school,
+                "degree": degree,
+                "field": field,
+                "location": location_val,
+                "endDate": end_date,
             }
         )
+    education = education[:15]
 
     skills_in = resume_content.get("skills") or []
-    skills_flat: List[str] = [s.strip() for s in skills_in if isinstance(s, str) and s.strip()]
+    skills_flat: List[str] = [_as_clean_str(s, 80) for s in skills_in if isinstance(s, str) and _as_clean_str(s, 80)]
+    # Deduplicate while preserving order.
+    seen_skills: set[str] = set()
+    deduped_skills: List[str] = []
+    for s in skills_flat:
+        key = s.lower()
+        if key in seen_skills:
+            continue
+        seen_skills.add(key)
+        deduped_skills.append(s)
+    skills_flat = deduped_skills[:80]
     skills = [{"category": "Technical", "skills": skills_flat}]
 
-    summary = (resume_content.get("summary") or "").strip()
+    summary = _compact_lines(_as_clean_str(resume_content.get("summary"), 2000), 2000)
 
     # Backend doesn't model projects directly; allow `custom.projects` to feed AI.
     projects_out: List[Dict[str, Any]] = []
@@ -101,13 +154,19 @@ def backend_content_to_ai_request(resume_content: Dict[str, Any]) -> Dict[str, A
                 if not isinstance(bullets, list):
                     bullets = _clean_bullets_from_description(p.get("description") or p.get("bullets"))
                 bullets = [str(b).strip() for b in bullets if str(b).strip()]
+                title = _as_clean_str(p.get("title") or p.get("name"), 200)
+                link = _as_clean_str(p.get("link") or p.get("url"), 512)
+                cleaned_bullets = [_as_clean_str(b, 220) for b in bullets if _as_clean_str(b, 220)][:6]
+                if not (title or link or cleaned_bullets):
+                    continue
                 projects_out.append(
                     {
-                        "title": (p.get("title") or p.get("name") or "").strip(),
-                        "link": (p.get("link") or p.get("url") or "").strip(),
-                        "bullets": bullets,
+                        "title": title,
+                        "link": link,
+                        "bullets": cleaned_bullets,
                     }
                 )
+    projects_out = projects_out[:20]
 
     return {
         "name": name or "",

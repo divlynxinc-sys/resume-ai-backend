@@ -2,6 +2,7 @@
 import re
 from io import BytesIO
 from typing import Any
+from urllib.parse import urlparse
 
 from app.schemas.resume_schema import (
     EducationItem,
@@ -57,16 +58,120 @@ def _extract_phone(text: str) -> str | None:
     return None
 
 
-def _extract_linkedin(text: str) -> str | None:
-    match = re.search(r"linkedin\.com/in/[a-zA-Z0-9_-]+", text, re.IGNORECASE)
-    if match:
-        return "https://" + match.group(0)
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if not item:
+            continue
+        key = item.strip()
+        if not key:
+            continue
+        if key.lower() in seen:
+            continue
+        seen.add(key.lower())
+        out.append(key)
+    return out
+
+
+def _normalize_url(raw: str) -> str | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    # Clean common trailing punctuation extracted from PDFs.
+    s = s.rstrip(".,;:)]}>'\"")
+
+    if s.lower().startswith("www."):
+        s = "https://" + s
+
+    if not re.match(r"^https?://", s, re.IGNORECASE):
+        s = "https://" + s
+
+    return s
+
+
+def _hostname_from_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        return (parsed.hostname or "").lower()
+    except Exception:
+        return ""
+
+
+# Social URL extractors (tolerate missing scheme and trailing slash).
+_LINKEDIN_URL_PAT = re.compile(
+    r"(?i)\b(?:https?://)?(?:www\.)?linkedin\.com/(?:in|company|pub)/[a-z0-9_-]+/?(?:\?[^\s\)]+)?"
+)
+_GITHUB_URL_PAT = re.compile(
+    r"(?i)\b(?:https?://)?(?:www\.)?github\.com/[a-z0-9_.-]+(?:/[a-z0-9_.-]+)?/?(?:\?[^\s\)]+)?"
+)
+_TWITTER_URL_PAT = re.compile(
+    r"(?i)\b(?:https?://)?(?:www\.)?(?:twitter\.com|x\.com)/[a-z0-9_]+/?(?:\?[^\s\)]+)?"
+)
+
+# Generic URL candidates for portfolio selection.
+_URL_WITH_SCHEME_PAT = re.compile(r"(?i)\bhttps?://[^\s\)\]\}>,\"']+")
+_WWW_URL_PAT = re.compile(r"(?i)\bwww\.[^\s\)\]\}>,\"']+")
+# Bare domain with a path (e.g. `example.com/resume`).
+_BARE_DOMAIN_WITH_PATH_PAT = re.compile(r"(?i)\b((?:[a-z0-9-]+\.)+[a-z]{2,})/[^\s\)\]\}>,\"']+")
+
+
+def _extract_url_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    for pat in (_URL_WITH_SCHEME_PAT, _WWW_URL_PAT, _BARE_DOMAIN_WITH_PATH_PAT):
+        for m in pat.finditer(text):
+            candidates.append(m.group(0))
+    normalized = [_normalize_url(c) for c in candidates]
+    return _dedupe_preserve_order([u for u in normalized if u])
+
+
+def _extract_social_urls(text: str) -> dict[str, list[str]]:
+    linkedin_urls: list[str] = []
+    github_urls: list[str] = []
+    twitter_urls: list[str] = []
+
+    for m in _LINKEDIN_URL_PAT.finditer(text):
+        val = _normalize_url(m.group(0))
+        if val:
+            linkedin_urls.append(val)
+    for m in _GITHUB_URL_PAT.finditer(text):
+        val = _normalize_url(m.group(0))
+        if val:
+            github_urls.append(val)
+    for m in _TWITTER_URL_PAT.finditer(text):
+        val = _normalize_url(m.group(0))
+        if val:
+            twitter_urls.append(val)
+
+    linkedin_urls = _dedupe_preserve_order(linkedin_urls)
+    github_urls = _dedupe_preserve_order(github_urls)
+    twitter_urls = _dedupe_preserve_order(twitter_urls)
+
+    return {
+        "linkedin": linkedin_urls,
+        "github": github_urls,
+        "twitter_x": twitter_urls,
+    }
+
+
+def _extract_portfolio_url(text: str, social_urls: dict[str, list[str]]) -> str | None:
+    # Prefer GitHub when present (common portfolio fallback for dev resumes).
+    github_urls = social_urls.get("github") or []
+    if isinstance(github_urls, list) and github_urls:
+        return github_urls[0]
+
+    # Otherwise pick a non-linkedin website candidate.
+    candidates = _extract_url_candidates(text)
+    for u in candidates:
+        host = _hostname_from_url(u)
+        if not host:
+            continue
+        if host.endswith("linkedin.com"):
+            continue
+        if host.endswith("twitter.com") or host == "x.com" or host.endswith("x.com"):
+            continue
+        return u
     return None
-
-
-def _extract_website(text: str) -> str | None:
-    match = re.search(r"https?://(?!linkedin)[^\s\)\]]+", text)
-    return match.group(0).rstrip(".,)") if match else None
 
 
 def _split_sections(text: str) -> dict[str, str]:
@@ -142,26 +247,73 @@ def _parse_experience_block(block: str) -> list[dict[str, Any]]:
             before = line[: date_match.start()].strip().rstrip(",-|")
             after  = line[date_match.end():].strip().lstrip(",-|")
 
-            # Try to split role / company from the text before or after the date
-            role, company, location = "", "", ""
+            # Many resumes have a multi-column layout; PDF extraction may place
+            # dates on a separate line from the role/company. Try to find the
+            # best "header" candidate around the date line.
             combined = (before + " " + after).strip()
+            header_candidates: list[tuple[str, str]] = [("same", combined)]
+            if i > 0:
+                header_candidates.append(("prev", lines[i - 1].strip()))
+            if i + 1 < len(lines):
+                header_candidates.append(("next", lines[i + 1].strip()))
+
+            def header_score(s: str) -> int:
+                s = (s or "").strip()
+                if not s:
+                    return -10_000
+                # Penalize things that look like pure dates.
+                if _DATE_PAT.search(s):
+                    return -5_000
+                # Prefer strings that contain common separators.
+                has_sep = any(sep.strip() in s for sep in ("|", "-", " at ", " @ ", ","))
+                # Prefer role/company lines: short and title-like.
+                title_like = bool(re.match(r"^[A-Z][A-Za-z]+(?:\s+[A-Za-z][A-Za-z0-9&./]+){0,6}$", s))
+
+                # Prefer moderate length (role/company lines are usually short).
+                length_score = 60 - abs(len(s) - 45)
+
+                # Penalize bullet-only or description-like sentences.
+                if re.match(r"^[•·\-–—]\s*", s):
+                    length_score -= 40
+                if re.search(
+                    r"(?i)\b(responsible|developed|worked|managed|led|achievement|impact|built|designed|implemented|created|improved)\b",
+                    s,
+                ):
+                    length_score -= 60
+                if "." in s:
+                    length_score -= 10
+                return (30 if has_sep else 0) + length_score
+
+            header_source, header_text = max(header_candidates, key=lambda t: header_score(t[1]))
+
+            role, company, location = "", "", ""
+            # Try to split role / company from the header candidate
+            header_parts = header_text
             for sep in (" at ", " | ", " - ", " @ ", ", "):
-                if sep in combined:
-                    role, company = combined.split(sep, 1)
-                    role = role.strip(); company = company.strip()
+                if sep in header_parts:
+                    left, right = header_parts.split(sep, 1)
+                    role = left.strip()
+                    company = right.strip()
                     break
             if not role:
-                role = combined
+                role = header_parts.strip()
 
-            # Collect description lines
+            # Collect description lines (skip the "next" line if we used it as header).
             desc_lines: list[str] = []
-            i += 1
+            i = i + 1 if header_source != "next" else i + 2
             while i < len(lines):
                 nxt = lines[i]
                 if _DATE_PAT.search(nxt):
                     break
                 # Stop if a new entry looks like a title line (short, title-cased)
-                if len(nxt) < 80 and re.match(r"^[A-Z][a-zA-Z]+(?:\s+[A-Za-z]+){0,5}$", nxt) and i + 1 < len(lines) and _DATE_PAT.search(lines[i + 1] if i + 1 < len(lines) else ""):
+                if (
+                    len(nxt) < 80
+                    and re.match(r"^[A-Z][a-zA-Z]+(?:\s+[A-Za-z]+){0,5}$", nxt)
+                    and i + 1 < len(lines)
+                    and _DATE_PAT.search(lines[i + 1] if i + 1 < len(lines) else "")
+                    # Avoid breaking on real description sentences.
+                    and not re.search(r"(?i)\b(responsible|developed|worked|managed|led|achievement|impact)\b", nxt)
+                ):
                     break
                 desc_lines.append(nxt.lstrip("•-–—·").strip())
                 i += 1
@@ -351,10 +503,17 @@ def parse_resume_content(text: str, filename: str = "") -> dict:
     if not text:
         return ResumeContent().model_dump()
 
-    email    = _extract_email(text)
-    phone    = _extract_phone(text)
-    linkedin = _extract_linkedin(text)
-    website  = _extract_website(text)
+    # For contact/social extraction, tolerate newlines inserted mid-URL by PDF extractors.
+    scan_text = re.sub(r"\s+", " ", text)
+
+    email = _extract_email(scan_text)
+    phone = _extract_phone(scan_text)
+
+    social_urls = _extract_social_urls(scan_text)
+    linkedin_urls = social_urls.get("linkedin") or []
+    linkedin = linkedin_urls[0] if isinstance(linkedin_urls, list) and linkedin_urls else None
+
+    website = _extract_portfolio_url(scan_text, social_urls)
     name     = _guess_name_from_text(text)
 
     info: dict[str, Any] = {
@@ -459,7 +618,7 @@ def parse_resume_content(text: str, filename: str = "") -> dict:
         "skills":          skills,
         "summary":         summary,
         "job_description": JobDescription().model_dump(),
-        "custom":          {},
+        "custom":          {"social_urls": social_urls},
     }
     try:
         return ResumeContent.model_validate(content).model_dump()

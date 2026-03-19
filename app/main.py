@@ -1,9 +1,11 @@
 import os
 import subprocess
 import sys
+from typing import List
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.auth import router as auth_router
 from app.routers.profile import router as profile_router
@@ -41,6 +43,17 @@ app = FastAPI(
 )
 
 setup_swagger(app)
+
+_raw_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+cors_origins: List[str] = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.add_middleware(
     UserSessionMiddleware,
