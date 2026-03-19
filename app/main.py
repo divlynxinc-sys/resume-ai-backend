@@ -24,7 +24,9 @@ async def lifespan(app: FastAPI):
     # Run DB migrations on startup (enables free-tier deploys where Shell/Release Command aren't available)
     if os.getenv("RUN_MIGRATIONS_ON_STARTUP", "true").lower() in ("1", "true", "yes"):
         subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            # Some projects end up with multiple Alembic "heads".
+            # `upgrade heads` applies all terminal heads instead of failing on ambiguity.
+            [sys.executable, "-m", "alembic", "upgrade", "heads"],
             check=True,
             capture_output=False,
         )

@@ -15,6 +15,12 @@ from app.models.ats_score import ResumeATSScore
 from app.schemas.resume_schema import ResumeCreate, ResumeDetail, ResumeItem, ResumeUpdate, ResumeSection, ResumeContent
 from app.schemas.ats_schema import ATSScorePayload, ATSScoreResponse
 from app.utils.resume_parser import parse_uploaded_resume
+from app.utils.ai_client import get_ai_base_url, post_json
+from app.utils.resume_ai_adapter import (
+    ai_optimized_resume_to_backend_content,
+    backend_content_to_ai_request,
+    map_ai_ats_to_backend_payload,
+)
 
 router = APIRouter(prefix="/resumes", tags=["Resumes"])
 
@@ -360,6 +366,89 @@ def patch_content(
     db.add(r)
     db.commit()
     return {"message": "Updated", "section": section.value, "content": content[section.value]}
+
+
+@router.post("/{resume_id}/ai/optimize")
+def optimize_resume_with_ai(
+    resume_id: int,
+    update_resume_content: bool = Query(
+        default=True,
+        description="Whether to overwrite the current resume content with the AI-optimized content",
+    ),
+    store_ats_score: bool = Query(
+        default=True,
+        description="Whether to store AI ATS analysis in the DB",
+    ),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Runs the existing `resumeai-AI` pipeline (`/generate_resume`) using the resume content stored in this backend.
+    Returns the optimized resume content and (optionally) stores the ATS score.
+    """
+    r = _get_owned_resume(db, user.id, resume_id)
+    existing_content = r.content or {}
+
+    job_desc_obj = existing_content.get("job_description") or {}
+    if not isinstance(job_desc_obj, dict) or not (job_desc_obj.get("description") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing job_description.description in resume content",
+        )
+
+    ai_request = backend_content_to_ai_request(existing_content)
+    if not (ai_request.get("job_description") or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job description is empty after mapping to AI request",
+        )
+
+    ai_url = f"{get_ai_base_url()}/generate_resume"
+    try:
+        ai_response = post_json(ai_url, ai_request)
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+    ai_resume = ai_response.get("resume")
+    if not isinstance(ai_resume, dict) or not ai_response.get("ats_final_result"):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="AI service returned an invalid response")
+
+    optimized_content = ai_optimized_resume_to_backend_content(
+        existing_resume_content=existing_content,
+        ai_candidate_info=ai_response.get("candidate_info"),
+        ai_resume=ai_resume,
+    )
+
+    payload_for_db, ats_summary_for_response = map_ai_ats_to_backend_payload(ai_response)
+
+    ats_score_id = None
+    if store_ats_score:
+        score = ResumeATSScore(
+            resume_id=r.id,
+            user_id=user.id,
+            overall_score=payload_for_db["overall_score"],
+            max_score=payload_for_db["max_score"],
+            category_scores=payload_for_db["category_scores"],
+            recommendations=payload_for_db["recommendations"],
+        )
+        db.add(score)
+        db.commit()
+        db.refresh(score)
+        ats_score_id = score.id
+
+    if update_resume_content:
+        r.content = optimized_content
+        r.updated_at = datetime.now(timezone.utc)
+        db.add(r)
+        db.commit()
+        db.refresh(r)
+
+    return {
+        "message": "Resume optimized using resumeai-AI pipeline",
+        "resume": r.content,
+        "ats": ats_summary_for_response,
+        "ats_score_id": ats_score_id,
+    }
 
 
 @router.post("/{resume_id}/ats-score", response_model=ATSScoreResponse, status_code=status.HTTP_201_CREATED)

@@ -515,7 +515,41 @@ const response = await fetch(`${baseUrl}/resumes/from-upload`, {
 
 ---
 
-### 6.12 Save ATS Score
+### 6.12 Optimize Resume with AI
+
+**Endpoint:** `POST /resumes/{resume_id}/ai/optimize`  
+**Auth:** Required
+
+**Query Params:**
+| Param | Type | Default | Description |
+|------|------|---------|-------------|
+| `update_resume_content` | boolean | `true` | Overwrite `resume.content` with the AI-optimized sections |
+| `store_ats_score` | boolean | `true` | Persist ATS score in the DB (`/resumes/{resume_id}/ats-score`) |
+
+**Request Body:** none (uses the resume stored in DB)
+
+**Response (200):**
+```json
+{
+  "message": "Resume optimized using resumeai-AI pipeline",
+  "resume": { ... updated resume.content ... },
+  "ats": {
+    "final_ats_score": 87,
+    "keywords_found": ["..."],
+    "keywords_missing": ["..."],
+    "iterations_needed": 2
+  },
+  "ats_score_id": 12
+}
+```
+
+**Errors:**
+- `400` – missing `resume.content.job_description.description`
+- `502` – AI service failed or returned invalid response
+
+---
+
+### 6.13 Save ATS Score
 
 **Endpoint:** `POST /resumes/{resume_id}/ats-score`  
 **Auth:** Required
@@ -541,7 +575,7 @@ const response = await fetch(`${baseUrl}/resumes/from-upload`, {
 
 ---
 
-### 6.13 Get ATS Score
+### 6.14 Get ATS Score
 
 **Endpoint:** `GET /resumes/{resume_id}/ats-score`  
 **Auth:** Required
@@ -550,7 +584,7 @@ const response = await fetch(`${baseUrl}/resumes/from-upload`, {
 
 ---
 
-### 6.14 Get Sections Definition
+### 6.15 Get Sections Definition
 
 **Endpoint:** `GET /resumes/sections/definition?section={section}`  
 **Auth:** Required
