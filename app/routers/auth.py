@@ -13,6 +13,8 @@ from app.schemas.user_schema import (
     OtpStartResponse,
     OtpVerifyRequest,
     ProfileUpdate,
+    SignupOtpSend,
+    SignupOtpVerify,
     TokenPair,
     TokenRefresh,
     UserCreate,
@@ -22,13 +24,64 @@ from app.schemas.user_schema import (
 from app.utils.auth_utils import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from app.utils.email_utils import send_otp_email
 
+# In-memory store for signup OTPs: {email: {"otp": str, "expires_at": datetime}}
+_signup_otps: dict[str, dict] = {}
+
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-@router.post("/signup")
+@router.post("/signup/send-otp")
+def signup_send_otp(payload: SignupOtpSend, db: Session = Depends(get_db)):
+    """Send a 6-digit OTP to the given email for signup verification."""
+    email_normalized = payload.email.lower()
+    existing = db.query(User).filter(User.email == email_normalized).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    otp_code = f"{random.randint(0, 999999):06d}"
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+
+    _signup_otps[email_normalized] = {"otp": otp_code, "expires_at": expires_at}
+
+    send_otp_email(email_normalized, otp_code, subject="Verify your email - Jobsynk AI", template="otp_signup.html")
+
+    return {"message": "OTP sent to your email", "otp_sent": True}
+
+
+@router.post("/signup/verify-otp")
+def signup_verify_otp(payload: SignupOtpVerify):
+    """Verify the signup OTP code."""
+    email_normalized = payload.email.lower()
+    entry = _signup_otps.get(email_normalized)
+
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No OTP found. Please request a new one.")
+
+    now = datetime.now(timezone.utc)
+    if entry["expires_at"] < now:
+        _signup_otps.pop(email_normalized, None)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OTP has expired. Please request a new one.")
+
+    if entry["otp"] != payload.otp_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP code")
+
+    # Mark as verified (keep entry so signup can check it)
+    _signup_otps[email_normalized]["verified"] = True
+
+    return {"message": "Email verified successfully", "verified": True}
+
+
+@router.post("/signup", response_model=TokenPair)
 def signup(user: UserCreate, db: Session = Depends(get_db)):
     email_normalized = user.email.lower()
+
+    # Verify that email OTP was completed
+    otp_entry = _signup_otps.get(email_normalized)
+    if not otp_entry or not otp_entry.get("verified"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email not verified. Please verify your email first.")
+    _signup_otps.pop(email_normalized, None)
+
     existing = db.query(User).filter(User.email == email_normalized).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
@@ -43,7 +96,20 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
     db.add(instance)
     db.commit()
     db.refresh(instance)
-    return {"message": "User registered successfully", "user_id": instance.id}
+
+    # Return tokens so the user is logged in immediately
+    token_version = int(instance.token_version or 1)
+    user_id = str(instance.id)
+    access_token = create_access_token(
+        subject=user_id,
+        token_version=token_version,
+        additional_claims={"email": instance.email, "role": instance.role or Roles.user},
+    )
+    refresh_token = create_refresh_token(
+        subject=user_id,
+        token_version=token_version,
+    )
+    return TokenPair(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
 
 
 @router.post("/login", response_model=TokenPair)

@@ -7,6 +7,15 @@ class UserCreate(BaseModel):
     password: str
 
 
+class SignupOtpSend(BaseModel):
+    email: EmailStr
+
+
+class SignupOtpVerify(BaseModel):
+    email: EmailStr
+    otp_code: str
+
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
