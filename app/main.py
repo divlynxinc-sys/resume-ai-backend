@@ -1,9 +1,11 @@
 import os
 import subprocess
 import sys
+from typing import List
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.auth import router as auth_router
 from app.routers.profile import router as profile_router
@@ -24,7 +26,9 @@ async def lifespan(app: FastAPI):
     # Run DB migrations on startup (enables free-tier deploys where Shell/Release Command aren't available)
     if os.getenv("RUN_MIGRATIONS_ON_STARTUP", "true").lower() in ("1", "true", "yes"):
         subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            # Some projects end up with multiple Alembic "heads".
+            # `upgrade heads` applies all terminal heads instead of failing on ambiguity.
+            [sys.executable, "-m", "alembic", "upgrade", "heads"],
             check=True,
             capture_output=False,
         )
@@ -39,6 +43,17 @@ app = FastAPI(
 )
 
 setup_swagger(app)
+
+_raw_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+cors_origins: List[str] = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.add_middleware(
     UserSessionMiddleware,
