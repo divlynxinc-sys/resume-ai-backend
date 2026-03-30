@@ -75,3 +75,7 @@ class PasswordChange(BaseModel):
     old_password: str
     new_password: str
     confirm_password: str
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str  # Google ID token from frontend

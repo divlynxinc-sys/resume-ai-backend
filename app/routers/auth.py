@@ -1,6 +1,8 @@
+import os
 from datetime import datetime, timezone, timedelta
 import random
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -9,6 +11,7 @@ from app.core.security import require_roles
 from app.database.connection import get_db
 from app.models.user import User
 from app.schemas.user_schema import (
+    GoogleAuthRequest,
     OtpLoginStart,
     OtpStartResponse,
     OtpVerifyRequest,
@@ -23,6 +26,8 @@ from app.schemas.user_schema import (
 )
 from app.utils.auth_utils import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from app.utils.email_utils import send_otp_email
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
 # In-memory store for signup OTPs: {email: {"otp": str, "expires_at": datetime}}
 _signup_otps: dict[str, dict] = {}
@@ -125,7 +130,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email_normalized, User.is_deleted == False).first()  # noqa: E712
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    if not verify_password(payload.password, user.password_hash):
+    if not user.password_hash or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     token_version = int(user.token_version or 1)
     user_id = str(user.id)
@@ -151,7 +156,7 @@ def start_otp_login(payload: OtpLoginStart, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email_normalized, User.is_deleted == False).first()  # noqa: E712
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    if not verify_password(payload.password, user.password_hash):
+    if not user.password_hash or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     # Generate a 6-digit numeric OTP
@@ -195,6 +200,73 @@ def verify_otp_login(payload: OtpVerifyRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    token_version = int(user.token_version or 1)
+    user_id = str(user.id)
+    access_token = create_access_token(
+        subject=user_id,
+        token_version=token_version,
+        additional_claims={"email": user.email, "role": user.role or Roles.user},
+    )
+    refresh_token = create_refresh_token(
+        subject=user_id,
+        token_version=token_version,
+    )
+    return TokenPair(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
+
+
+@router.post("/google", response_model=TokenPair)
+def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """
+    Authenticate with Google. Accepts a Google access token from the frontend.
+    Verifies it by calling Google's userinfo API.
+    - If the Google account is already linked to a user, logs them in.
+    - If the email exists but isn't linked to Google yet, links the account and logs in.
+    - If the user doesn't exist, creates a new account.
+    """
+    # Verify the access token by fetching user info from Google
+    try:
+        resp = httpx.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {payload.credential}"},
+        )
+        if resp.status_code != 200:
+            raise ValueError("Invalid token")
+        idinfo = resp.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Google token")
+
+    google_sub = idinfo["sub"]
+    email = idinfo.get("email", "").lower()
+    name = idinfo.get("name", email.split("@")[0])
+
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google account has no email")
+
+    # 1. Check if user exists by google_sub
+    user = db.query(User).filter(User.google_sub == google_sub, User.is_deleted == False).first()  # noqa: E712
+
+    if not user:
+        # 2. Check if user exists by email (link Google to existing account)
+        user = db.query(User).filter(User.email == email, User.is_deleted == False).first()  # noqa: E712
+        if user:
+            user.google_sub = google_sub
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            # 3. Create new user
+            user = User(
+                name=name,
+                email=email,
+                password_hash=None,
+                google_sub=google_sub,
+                role=Roles.user,
+                token_version=1,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
 
     token_version = int(user.token_version or 1)
     user_id = str(user.id)

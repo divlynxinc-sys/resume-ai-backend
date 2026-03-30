@@ -1,0 +1,25 @@
+Collecting google-auth
+  Downloading google_auth-2.49.1-py3-none-any.whl.metadata (6.2 kB)
+Collecting pyasn1-modules>=0.2.1 (from google-auth)
+  Using cached pyasn1_modules-0.4.2-py3-none-any.whl.metadata (3.5 kB)
+Collecting cryptography>=38.0.3 (from google-auth)
+  Downloading cryptography-46.0.6-cp311-abi3-win_amd64.whl.metadata (5.7 kB)
+Collecting cffi>=2.0.0 (from cryptography>=38.0.3->google-auth)
+  Downloading cffi-2.0.0-cp313-cp313-win_amd64.whl.metadata (2.6 kB)
+Collecting pycparser (from cffi>=2.0.0->cryptography>=38.0.3->google-auth)
+  Using cached pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+Collecting pyasn1<0.7.0,>=0.6.1 (from pyasn1-modules>=0.2.1->google-auth)
+  Downloading pyasn1-0.6.3-py3-none-any.whl.metadata (8.4 kB)
+Downloading google_auth-2.49.1-py3-none-any.whl (240 kB)
+Downloading cryptography-46.0.6-cp311-abi3-win_amd64.whl (3.5 MB)
+   ---------------------------------------- 3.5/3.5 MB 3.1 MB/s eta 0:00:00
+Downloading cffi-2.0.0-cp313-cp313-win_amd64.whl (183 kB)
+Using cached pyasn1_modules-0.4.2-py3-none-any.whl (181 kB)
+Downloading pyasn1-0.6.3-py3-none-any.whl (83 kB)
+Using cached pycparser-3.0-py3-none-any.whl (48 kB)
+Installing collected packages: pycparser, pyasn1, pyasn1-modules, cffi, cryptography, google-auth
+
+Successfully installed cffi-2.0.0 cryptography-46.0.6 google-auth-2.49.1 pyasn1-0.6.3 pyasn1-modules-0.4.2 pycparser-3.0
+
+[notice] A new release of pip is available: 25.1.1 -> 26.0.1
+[notice] To update, run: C:\Users\ababd\AppData\Local\Programs\Python\Python313\python.exe -m pip install --upgrade pip
