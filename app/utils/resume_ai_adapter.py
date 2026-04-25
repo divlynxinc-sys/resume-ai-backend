@@ -298,13 +298,14 @@ def map_ai_ats_to_backend_payload(ai_response: Dict[str, Any]) -> Tuple[Dict[str
     ats_report = ai_resume.get("ats_report") or {}
     ats_final = ai_response.get("ats_final_result") or {}
 
-    overall_score = (
-        ats_final.get("final_ats_score")
-        or ats_report.get("coverage_percent")
-        or 0
-    )
+    # Trust ats_final.final_ats_score even when it's 0 (legitimate score).
+    # The LLM-filled ats_report.coverage_percent is a hallucinated fallback only used
+    # when the AI service didn't return a real score at all.
+    raw_final_score = ats_final.get("final_ats_score")
+    if raw_final_score is None:
+        raw_final_score = ats_report.get("coverage_percent")
     try:
-        overall_score_int = int(float(overall_score))
+        overall_score_int = int(float(raw_final_score)) if raw_final_score is not None else 0
     except Exception:
         overall_score_int = 0
 
@@ -312,16 +313,30 @@ def map_ai_ats_to_backend_payload(ai_response: Dict[str, Any]) -> Tuple[Dict[str
     recommendations = ats_report.get("notes") or []
     if not isinstance(recommendations, list):
         recommendations = []
-    keywords_covered = ats_report.get("keywords_covered") or []
-    keywords_missing = ats_report.get("keywords_missing") or []
-    if not isinstance(keywords_covered, list):
-        keywords_covered = []
-    if not isinstance(keywords_missing, list):
-        keywords_missing = []
+    report_keywords_covered = ats_report.get("keywords_covered") or []
+    report_keywords_missing = ats_report.get("keywords_missing") or []
+    if not isinstance(report_keywords_covered, list):
+        report_keywords_covered = []
+    if not isinstance(report_keywords_missing, list):
+        report_keywords_missing = []
+
+    # Prefer the deterministic Python-computed lists from ats_final. Fall back to
+    # the LLM-filled ats_report ONLY when ats_final didn't supply that key at all
+    # (a missing key, not an empty list — an empty list is a real "nothing
+    # missing" answer and we must respect it, otherwise score-vs-gaps lie to the user).
+    final_keywords_found = ats_final.get("keywords_found")
+    final_keywords_missing = ats_final.get("keywords_missing")
+
+    keywords_found = (
+        final_keywords_found if isinstance(final_keywords_found, list) else report_keywords_covered
+    )
+    keywords_missing = (
+        final_keywords_missing if isinstance(final_keywords_missing, list) else report_keywords_missing
+    )
 
     category_scores = {
         "keyword_match": {
-            "keywords_covered": keywords_covered,
+            "keywords_covered": keywords_found,
             "keywords_missing": keywords_missing,
         }
     }
@@ -333,11 +348,29 @@ def map_ai_ats_to_backend_payload(ai_response: Dict[str, Any]) -> Tuple[Dict[str
         "recommendations": [str(n) for n in recommendations if str(n).strip()],
     }
 
+    # Initial (pre-optimization) score, if the AI service supplied one.
+    ats_initial = ai_response.get("ats_initial_result") or {}
+    raw_initial_score = ats_initial.get("final_ats_score")
+    try:
+        initial_score_int = int(float(raw_initial_score)) if raw_initial_score is not None else None
+    except Exception:
+        initial_score_int = None
+
+    initial_keywords_found = ats_initial.get("keywords_found")
+    initial_keywords_missing = ats_initial.get("keywords_missing")
+    if not isinstance(initial_keywords_found, list):
+        initial_keywords_found = []
+    if not isinstance(initial_keywords_missing, list):
+        initial_keywords_missing = []
+
     ats_summary_for_response = {
         "final_ats_score": overall_score_int,
-        "keywords_found": ats_final.get("keywords_found") or keywords_covered,
-        "keywords_missing": ats_final.get("keywords_missing") or keywords_missing,
+        "keywords_found": keywords_found,
+        "keywords_missing": keywords_missing,
         "iterations_needed": ats_final.get("iterations_needed"),
+        "initial_ats_score": initial_score_int,
+        "initial_keywords_found": initial_keywords_found,
+        "initial_keywords_missing": initial_keywords_missing,
     }
     return payload_for_db, ats_summary_for_response
 
