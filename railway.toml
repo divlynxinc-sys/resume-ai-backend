@@ -4,3 +4,6 @@ builder = "nixpacks"
 [deploy]
 startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/"
+
+[variables]
+RESUMEAI_AI_TIMEOUT_SECONDS = "840"

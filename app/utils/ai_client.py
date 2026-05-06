@@ -25,7 +25,7 @@ def post_json(
     timeout_seconds: Optional[int] = None,
     headers: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    timeout_seconds = timeout_seconds or int(_get_env("RESUMEAI_AI_TIMEOUT_SECONDS", "180"))
+    timeout_seconds = timeout_seconds or int(_get_env("RESUMEAI_AI_TIMEOUT_SECONDS", "840"))
     headers = headers or {}
     headers = {**headers, "Content-Type": "application/json"}
 
