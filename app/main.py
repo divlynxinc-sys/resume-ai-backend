@@ -17,6 +17,9 @@ from app.routers.pricing import router as pricing_router
 from app.routers.settings import router as settings_router
 from app.routers.help_center import router as help_router
 from app.routers.juno import router as juno_router
+from app.routers.payments import router as payments_router
+from app.routers.webhooks import router as webhooks_router
+from app.routers.cover_letter import router as cover_letter_router
 from app.middleware.session import UserSessionMiddleware
 from app.core.swagger import setup_swagger
 
@@ -74,6 +77,9 @@ app.include_router(pricing_router)
 app.include_router(settings_router)
 app.include_router(help_router)
 app.include_router(juno_router)
+app.include_router(payments_router)
+app.include_router(webhooks_router)
+app.include_router(cover_letter_router)
 
 @app.get("/")
 def root():
