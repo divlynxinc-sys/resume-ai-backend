@@ -20,6 +20,8 @@ from app.routers.juno import router as juno_router
 from app.routers.payments import router as payments_router
 from app.routers.webhooks import router as webhooks_router
 from app.routers.cover_letter import router as cover_letter_router
+from app.routers.hr_email_drafts import router as hr_email_drafts_router
+from app.routers.qa_answers import router as qa_answers_router
 from app.middleware.session import UserSessionMiddleware
 from app.core.swagger import setup_swagger
 
@@ -80,6 +82,8 @@ app.include_router(juno_router)
 app.include_router(payments_router)
 app.include_router(webhooks_router)
 app.include_router(cover_letter_router)
+app.include_router(hr_email_drafts_router)
+app.include_router(qa_answers_router)
 
 @app.get("/")
 def root():
