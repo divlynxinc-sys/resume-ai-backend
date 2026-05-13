@@ -245,6 +245,7 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
 
     # 1. Check if user exists by google_sub
     user = db.query(User).filter(User.google_sub == google_sub, User.is_deleted == False).first()  # noqa: E712
+    is_new_user = False
 
     if not user:
         # 2. Check if user exists by email (link Google to existing account)
@@ -256,6 +257,7 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
             db.refresh(user)
         else:
             # 3. Create new user
+            is_new_user = True
             user = User(
                 name=name,
                 email=email,
@@ -279,7 +281,7 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
         subject=user_id,
         token_version=token_version,
     )
-    return TokenPair(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
+    return TokenPair(access_token=access_token, refresh_token=refresh_token, token_type="bearer", is_new_user=is_new_user)
 
 
 @router.post("/refresh", response_model=TokenPair)
