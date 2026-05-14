@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.config import Roles
-from app.core.security import require_roles, get_current_user
+from app.core.security import require_roles, get_current_user, require_paid_plan
 from app.database.connection import get_db
 from app.models.resume import Resume
 from app.models.user import User
@@ -380,7 +380,7 @@ def optimize_resume_with_ai(
         description="Whether to store AI ATS analysis in the DB",
     ),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_paid_plan()),
 ):
     """
     Runs the existing `resumeai-AI` pipeline (`/generate_resume`) using the resume content stored in this backend.

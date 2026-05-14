@@ -18,7 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_paid_plan
 from app.database.connection import get_db
 from app.models.resume import Resume
 from app.models.user import User
@@ -82,7 +82,7 @@ def _stream_from_ai(payload: dict) -> Generator[bytes, None, None]:
 def generate_cover_letter(
     body: CoverLetterRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_paid_plan()),
 ):
     if not (body.job_description or "").strip():
         raise HTTPException(

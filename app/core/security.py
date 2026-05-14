@@ -41,3 +41,26 @@ def require_roles(*allowed_roles: str) -> Callable[[User], User]:
         return user
     return _checker
 
+
+def require_paid_plan() -> Callable[[User], User]:
+    """
+    Gate for paid features (AI generations, premium downloads).
+
+    Returns 402 Payment Required with a structured `{code, message}` detail so the
+    frontend can detect the case and surface the upgrade modal instead of treating
+    it as a generic error. Admins always pass through.
+    """
+    def _checker(user: User = Depends(get_current_user)) -> User:
+        if (user.role or Roles.user) == Roles.admin:
+            return user
+        if not user.plan_id:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "code": "requires_plan",
+                    "message": "This feature requires an active subscription.",
+                },
+            )
+        return user
+    return _checker
+
