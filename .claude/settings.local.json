@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v \"^$\")",
+      "Bash(python -c \":*)",
+      "mcp__Neon__get_connection_string",
+      "mcp__Neon__get_database_tables",
+      "Bash(python -m alembic upgrade heads)",
+      "mcp__Neon__run_sql"
+    ]
+  }
+}

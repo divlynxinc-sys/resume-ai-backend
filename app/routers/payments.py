@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,22 @@ ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 
 class PolarCheckoutRequest(BaseModel):
     plan_slug: str = Field(..., description="Slug of the pricing plan, e.g. 'weekly'")
+
+
+def _resolve_success_url(request: Request) -> str:
+    """
+    Build the post-checkout redirect URL, preferring the origin the checkout was
+    started from (so a checkout begun on localhost returns to localhost, prod to
+    prod) when it's allowlisted. Falls back to the configured `success_url`.
+
+    This is what closes the dev gap: without it, every checkout redirects to the
+    single hard-coded `POLAR_SUCCESS_URL`, so a local tester lands on the deployed
+    site's /success page — which syncs the deployed DB, never their local one.
+    """
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    if origin and origin in polar_settings.allowed_success_origins:
+        return f"{origin}/success?checkout_id={{CHECKOUT_ID}}"
+    return polar_settings.success_url
 
 
 class PolarCheckoutResponse(BaseModel):
@@ -60,6 +76,7 @@ class PolarPortalResponse(BaseModel):
 @router.post("/polar/checkout", response_model=PolarCheckoutResponse)
 def create_polar_checkout(
     payload: PolarCheckoutRequest,
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
@@ -90,7 +107,7 @@ def create_polar_checkout(
         checkout = polar.checkouts.create(
             request={
                 "products": [product_id],
-                "success_url": polar_settings.success_url,
+                "success_url": _resolve_success_url(request),
                 "customer_email": user.email,
                 "external_customer_id": str(user.id),
                 "metadata": {
@@ -121,20 +138,51 @@ def _slug_for_product_id(product_id: str) -> Optional[str]:
     return None
 
 
-def _get_active_subscription(user_id: int) -> Optional[Any]:
+def _status_str(sub: Any) -> str:
+    """Normalize a subscription status to a lowercase string.
+
+    The Polar SDK returns status as an enum (e.g. SubscriptionStatus.ACTIVE), so a
+    naive `status in {"active", ...}` comparison silently misses. `.value` on the
+    enum (or str() fallback) gives us the plain "active"/"trialing" string.
+    """
+    raw = getattr(sub, "status", None)
+    value = getattr(raw, "value", raw)
+    return str(value).lower() if value is not None else ""
+
+
+def _is_active(sub: Any) -> bool:
+    return _status_str(sub) in ACTIVE_SUBSCRIPTION_STATUSES
+
+
+def _items(response: Any) -> list:
+    if response and getattr(response, "result", None):
+        return response.result.items or []
+    return []
+
+
+def _get_active_subscription(user_id: int, user_email: Optional[str] = None) -> Optional[Any]:
     """Return the user's first active Polar subscription, or None.
+
+    Looks up by `external_customer_id` first, then falls back to matching the
+    Polar customer by email. The email fallback matters because sandbox/Polar data
+    can drift from the local DB: a customer may carry a stale `external_id` (or a
+    subscription may have `external_customer_id=None`) after the local DB is
+    reseeded, so the id-based lookup misses an actually-active subscription.
 
     Raises HTTPException on SDK / network failures so callers can pass-through.
     """
     try:
         polar = get_polar()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+
+    # 1) Primary: by external_customer_id (how checkouts are tagged).
+    try:
         response = polar.subscriptions.list(
             external_customer_id=str(user_id),
             active=True,
             limit=10,
         )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     except Exception as exc:
         logger.exception("Polar: listing subscriptions failed for user %s", user_id)
         raise HTTPException(
@@ -142,13 +190,37 @@ def _get_active_subscription(user_id: int) -> Optional[Any]:
             detail=f"Polar request failed: {exc}",
         )
 
-    items = []
-    if response and getattr(response, "result", None):
-        items = response.result.items or []
-    return next(
-        (s for s in items if getattr(s, "status", None) in ACTIVE_SUBSCRIPTION_STATUSES),
-        None,
-    )
+    active = next((s for s in _items(response) if _is_active(s)), None)
+    if active:
+        return active
+
+    # 2) Fallback: resolve the Polar customer by the authenticated user's own email,
+    #    then check that customer's subscriptions. Safe — the user owns this email.
+    if user_email:
+        try:
+            customers = _items(polar.customers.list(email=user_email, limit=10))
+            for cust in customers:
+                cust_id = getattr(cust, "id", None)
+                if not cust_id:
+                    continue
+                sub = next(
+                    (s for s in _items(polar.subscriptions.list(customer_id=cust_id, limit=20))
+                     if _is_active(s)),
+                    None,
+                )
+                if sub:
+                    logger.info(
+                        "Polar: matched active sub %s for user %s via email fallback "
+                        "(customer %s, external_id %s)",
+                        getattr(sub, "id", "?"), user_id, cust_id,
+                        getattr(cust, "external_id", None),
+                    )
+                    return sub
+        except Exception:
+            # Email fallback is best-effort — don't fail the whole request on it.
+            logger.exception("Polar: email fallback lookup failed for user %s", user_id)
+
+    return None
 
 
 @router.post("/polar/sync", response_model=PolarSyncResponse)
@@ -163,7 +235,7 @@ def sync_polar_subscription(
 
     Idempotent: re-running keeps the same plan if nothing changed on Polar's side.
     """
-    active_sub = _get_active_subscription(user.id)
+    active_sub = _get_active_subscription(user.id, user.email)
 
     if not active_sub:
         # No active subscription on Polar's side — clear local plan if previously set.
@@ -225,7 +297,7 @@ def get_polar_subscription(
     to render the current plan, renewal date, and whether the user already requested
     cancellation. Does NOT mutate local DB.
     """
-    active_sub = _get_active_subscription(user.id)
+    active_sub = _get_active_subscription(user.id, user.email)
     if not active_sub:
         return PolarSubscriptionDetails(has_subscription=False)
 
@@ -259,7 +331,7 @@ def switch_polar_plan(
     the difference immediately on the next invoice). No second checkout, no
     double-charge — the same subscription is updated in place.
     """
-    active_sub = _get_active_subscription(user.id)
+    active_sub = _get_active_subscription(user.id, user.email)
     if not active_sub:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -329,7 +401,7 @@ def cancel_polar_subscription(
     The user keeps access until `current_period_end` (the webhook clears the
     plan when Polar fires `subscription.revoked`). We don't touch plan_id here.
     """
-    active_sub = _get_active_subscription(user.id)
+    active_sub = _get_active_subscription(user.id, user.email)
     if not active_sub:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

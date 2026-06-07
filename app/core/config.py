@@ -21,10 +21,26 @@ class PolarSettings:
     webhook_secret: str = os.getenv("POLAR_WEBHOOK_SECRET", "")
     # "sandbox" while testing, "production" for live
     server: str = os.getenv("POLAR_SERVER", "sandbox")
-    # Frontend URL Polar redirects to after a successful checkout
+    # Frontend URL Polar redirects to after a successful checkout. Used as a
+    # fallback when the checkout request's Origin isn't in `allowed_success_origins`.
     success_url: str = os.getenv(
         "POLAR_SUCCESS_URL",
         "http://localhost:5173/success?checkout_id={CHECKOUT_ID}",
+    )
+    # Origins we're willing to redirect back to after checkout. The checkout route
+    # prefers the request's own Origin (so a checkout started on localhost returns
+    # to localhost, prod returns to prod) but only if it's in this allowlist —
+    # otherwise it falls back to `success_url`. Prevents open-redirect abuse.
+    allowed_success_origins: frozenset = field(
+        default_factory=lambda: frozenset(
+            o.strip().rstrip("/")
+            for o in os.getenv(
+                "POLAR_ALLOWED_ORIGINS",
+                "http://localhost:5173,http://127.0.0.1:5173,"
+                "https://resume-ai-frontend-beta.vercel.app",
+            ).split(",")
+            if o.strip()
+        )
     )
     # Map plan slug -> Polar product UUID. Set one env var per plan.
     product_ids: Dict[str, str] = field(
