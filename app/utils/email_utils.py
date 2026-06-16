@@ -20,15 +20,23 @@ def _send_via_resend(to_email: str, subject: str, html_body: str) -> bool:
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
         return False
-    resend.api_key = api_key
-    from_email = os.getenv("RESEND_FROM_EMAIL", "noreply@jobsynk.com")
-    resend.Emails.send({
-        "from": from_email,
-        "to": [to_email],
-        "subject": subject,
-        "html": html_body,
-    })
-    return True
+    try:
+        resend.api_key = api_key
+        from_email = os.getenv("RESEND_FROM_EMAIL", "noreply@jobsynk.com")
+        resend.Emails.send({
+            "from": from_email,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+        })
+        return True
+    except Exception as e:
+        # Common in test/sandbox setups: Resend's `onboarding@resend.dev` sender can
+        # only deliver to the account owner's verified email, so any other recipient
+        # raises here. Never let an email-provider failure crash the request — fall
+        # through to SMTP, then to the dev-console fallback.
+        print(f"[email] Resend send failed for {to_email}: {e}")
+        return False
 
 
 def _send_via_smtp(to_email: str, subject: str, html_body: str, plain_text: str) -> bool:
@@ -49,12 +57,17 @@ def _send_via_smtp(to_email: str, subject: str, html_body: str, plain_text: str)
     msg.set_content(plain_text)
     msg.add_alternative(html_body, subtype="html")
 
-    with smtplib.SMTP(host=smtp_host, port=smtp_port) as server:
-        if use_tls:
-            server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.send_message(msg)
-    return True
+    try:
+        # timeout prevents a hung SMTP connection from blocking the request thread.
+        with smtplib.SMTP(host=smtp_host, port=smtp_port, timeout=15) as server:
+            if use_tls:
+                server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"[email] SMTP send failed for {to_email}: {e}")
+        return False
 
 
 def send_otp_email(to_email: str, otp_code: str, *, subject: Optional[str] = None, template: str = "otp_login.html") -> None:

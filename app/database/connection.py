@@ -21,7 +21,17 @@ def _build_db_url_from_parts() -> str:
 
 DATABASE_URL = os.getenv("DATABASE_URL") or _build_db_url_from_parts()
 
-engine = create_engine(DATABASE_URL, future=True)
+# Neon (and most serverless/pooled Postgres) closes idle connections after a short
+# window. Without pre-ping, SQLAlchemy hands out a dead connection on the first
+# request after an idle period, which surfaces as intermittent 500s / "socket hang up"
+# / "connection reset" errors. pool_pre_ping validates the connection before use and
+# pool_recycle proactively drops connections older than the recycle window.
+engine = create_engine(
+    DATABASE_URL,
+    future=True,
+    pool_pre_ping=True,
+    pool_recycle=int(os.getenv("DB_POOL_RECYCLE_SECONDS", "280")),
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
 

@@ -10,7 +10,7 @@ import json
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Generator, Optional
 
 
 def _get_env(name: str, default: str) -> str:
@@ -46,6 +46,51 @@ def post_json(
         raise RuntimeError(f"AI service HTTPError {e.code}: {err_body or e.reason}")
     except Exception as e:
         raise RuntimeError(f"AI service request failed: {e}")
+
+
+def stream_from_ai_service(
+    path: str,
+    payload: Dict[str, Any],
+    *,
+    timeout_seconds: Optional[int] = None,
+) -> Generator[bytes, None, None]:
+    """
+    POST to a streaming AI-service endpoint and yield response bytes chunk-by-chunk.
+
+    Raises RuntimeError if the connection/HTTP request fails before the first chunk,
+    so callers can `next()` the generator once inside the request handler and convert
+    that into a clean HTTP error *before* the StreamingResponse starts. The timeout is
+    per-socket-operation (not a total deadline): tokens stream continuously once
+    generation begins, so it only trips if the AI service accepts then stalls.
+    """
+    url = f"{get_ai_base_url()}{path}"
+    timeout = timeout_seconds or int(_get_env("AI_STREAM_TIMEOUT_SECONDS", "120"))
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        raise RuntimeError(f"AI service error {e.code}: {body or e.reason}")
+    except Exception as e:
+        raise RuntimeError(f"AI service unreachable: {e}")
+
+    try:
+        while True:
+            chunk = resp.read(256)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        try:
+            resp.close()
+        except Exception:
+            pass
 
 
 def get_ai_base_url() -> str:
