@@ -8,10 +8,14 @@ client so users see tokens as they're produced (perceived speed >> wall-clock sp
 from __future__ import annotations
 
 import json
+import os
 from typing import Generator, Optional
 
 import urllib.error
 import urllib.request
+
+# Per-socket-operation timeout for the streaming AI call (see _stream_from_ai).
+AI_STREAM_TIMEOUT_SECONDS = int(os.getenv("AI_STREAM_TIMEOUT_SECONDS", "120"))
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -48,8 +52,11 @@ def _stream_from_ai(payload: dict) -> Generator[bytes, None, None]:
         method="POST",
     )
     try:
-        # urlopen with no timeout so the stream can run as long as the model needs.
-        resp = urllib.request.urlopen(req)
+        # Per-socket-operation timeout (not a total deadline): tokens stream
+        # continuously once generation starts, so this only trips if the AI service
+        # accepts the connection but then stalls (e.g. hung model) — which would
+        # otherwise hang the request forever. Generous enough to absorb a cold model load.
+        resp = urllib.request.urlopen(req, timeout=AI_STREAM_TIMEOUT_SECONDS)
     except urllib.error.HTTPError as e:
         try:
             body = e.read().decode("utf-8", errors="replace")

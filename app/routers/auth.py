@@ -229,6 +229,7 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
         resp = httpx.get(
             "https://www.googleapis.com/oauth2/v3/userinfo",
             headers={"Authorization": f"Bearer {payload.credential}"},
+            timeout=10.0,
         )
         if resp.status_code != 200:
             raise ValueError("Invalid token")
