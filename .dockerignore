@@ -1,0 +1,13 @@
+venv/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.env
+_verify_out/
+_smoke_out/
+verify_export.py
+test_export_smoke.py
+*.md

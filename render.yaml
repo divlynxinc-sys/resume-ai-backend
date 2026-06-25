@@ -9,7 +9,12 @@ services:
     runtime: python
     plan: free
 
-    buildCommand: pip install -r requirements.txt
+    # NOTE: PDF export renders HTML with headless Chromium (Playwright). The
+    # browser + its shared libraries must be present at runtime. `--with-deps`
+    # needs apt/root; on slim/free runtimes prefer a Docker deploy based on
+    # mcr.microsoft.com/playwright/python. Chromium also needs ~300MB+ RAM, so
+    # the free 512MB plan may OOM under concurrent exports.
+    buildCommand: pip install -r requirements.txt && python -m playwright install --with-deps chromium
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     # Migrations run automatically at app startup (see app/main.py lifespan)
 
