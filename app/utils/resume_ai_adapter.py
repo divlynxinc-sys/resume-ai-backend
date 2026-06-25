@@ -283,7 +283,37 @@ def ai_optimized_resume_to_backend_content(
         custom = updated.get("custom") or {}
         if not isinstance(custom, dict):
             custom = {}
-        custom["projects"] = ai_projects
+
+        # The custom link DISPLAY LABEL (feature 1.4) is a user presentation
+        # choice the LLM neither sees nor regenerates. Preserve it (and the
+        # original URL when the AI dropped it) across optimization, matching the
+        # prior projects positionally with a title fallback.
+        prior_projects = custom.get("projects") or []
+        prior_by_index = prior_projects if isinstance(prior_projects, list) else []
+        prior_by_title = {
+            str(p.get("title", "")).strip().lower(): p
+            for p in prior_by_index
+            if isinstance(p, dict) and str(p.get("title", "")).strip()
+        }
+        merged_projects = []
+        for i, proj in enumerate(ai_projects):
+            if not isinstance(proj, dict):
+                merged_projects.append(proj)
+                continue
+            prior = None
+            if i < len(prior_by_index) and isinstance(prior_by_index[i], dict):
+                prior = prior_by_index[i]
+            if prior is None:
+                prior = prior_by_title.get(str(proj.get("title", "")).strip().lower())
+            if isinstance(prior, dict):
+                label = prior.get("link_label")
+                if label and not proj.get("link_label"):
+                    proj["link_label"] = label
+                if not proj.get("link") and prior.get("link"):
+                    proj["link"] = prior.get("link")
+            merged_projects.append(proj)
+
+        custom["projects"] = merged_projects
         updated["custom"] = custom
 
     return updated
