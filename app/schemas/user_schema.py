@@ -9,6 +9,7 @@ class UserCreate(BaseModel):
 
 class SignupOtpSend(BaseModel):
     email: EmailStr
+    turnstile_token: str | None = None
 
 
 class SignupOtpVerify(BaseModel):
@@ -19,6 +20,7 @@ class SignupOtpVerify(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    turnstile_token: str
 
 
 class OtpLoginStart(BaseModel):
@@ -80,3 +82,4 @@ class PasswordChange(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     credential: str  # Google ID token from frontend
+    turnstile_token: str

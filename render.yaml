@@ -35,4 +35,6 @@ services:
         value: "60"
       - key: REFRESH_TOKEN_EXPIRE_MINUTES
         value: "43200"
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
       # Optional: add CORS_ORIGINS in Render Dashboard for your frontend URL(s)
