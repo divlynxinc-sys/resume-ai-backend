@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 import random
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.config import Roles
@@ -26,6 +26,7 @@ from app.schemas.user_schema import (
 )
 from app.utils.auth_utils import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from app.utils.email_utils import send_otp_email
+from app.utils.turnstile import verify_turnstile
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
@@ -37,9 +38,19 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
 @router.post("/signup/send-otp")
-def signup_send_otp(payload: SignupOtpSend, db: Session = Depends(get_db)):
+def signup_send_otp(payload: SignupOtpSend, request: Request, db: Session = Depends(get_db)):
     """Send a 6-digit OTP to the given email for signup verification."""
     email_normalized = payload.email.lower()
+    # A fresh challenge protects the first OTP request. Resends are allowed only
+    # for an email that already established an OTP session.
+    if payload.turnstile_token:
+        verify_turnstile(payload.turnstile_token, request.client.host if request.client else None)
+    elif email_normalized not in _signup_otps:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please complete the security verification",
+        )
+
     existing = db.query(User).filter(User.email == email_normalized).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
@@ -118,7 +129,7 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenPair)
-def login(payload: UserLogin, db: Session = Depends(get_db)):
+def login(payload: UserLogin, request: Request, db: Session = Depends(get_db)):
     """
     Standard email/password login that immediately returns access + refresh tokens.
 
@@ -126,6 +137,7 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     - POST /auth/login/otp/start
     - POST /auth/login/otp/verify
     """
+    verify_turnstile(payload.turnstile_token, request.client.host if request.client else None)
     email_normalized = payload.email.lower()
     user = db.query(User).filter(User.email == email_normalized, User.is_deleted == False).first()  # noqa: E712
     if not user:
@@ -216,7 +228,7 @@ def verify_otp_login(payload: OtpVerifyRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/google", response_model=TokenPair)
-def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
+def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depends(get_db)):
     """
     Authenticate with Google. Accepts a Google access token from the frontend.
     Verifies it by calling Google's userinfo API.
@@ -225,6 +237,7 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
     - If the user doesn't exist, creates a new account.
     """
     # Verify the access token by fetching user info from Google
+    verify_turnstile(payload.turnstile_token, request.client.host if request.client else None)
     try:
         resp = httpx.get(
             "https://www.googleapis.com/oauth2/v3/userinfo",
