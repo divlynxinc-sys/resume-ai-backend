@@ -22,12 +22,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.config import UsageFeature
 from app.core.security import get_current_user, require_paid_plan
 from app.database.connection import get_db
 from app.models.resume import Resume
 from app.models.user import User
 from app.utils.ai_client import get_ai_base_url
 from app.utils.resume_ai_adapter import backend_content_to_ai_request
+from app.utils.usage_limits import enforce_usage_limit
 
 
 router = APIRouter(prefix="/cover-letter", tags=["Cover Letter"])
@@ -131,6 +133,9 @@ def generate_cover_letter(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Provide either resume_id or resume_text",
         )
+
+    # Hidden weekly anti-abuse cap (raises 429 when exceeded). Admins bypass.
+    enforce_usage_limit(db, user, UsageFeature.cover_letter)
 
     return StreamingResponse(
         _stream_from_ai(payload),

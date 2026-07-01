@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.core.config import Roles
+from app.core.config import Roles, UsageFeature
 from app.core.security import require_roles, get_current_user, require_paid_plan
+from app.utils.usage_limits import enforce_usage_limit
 from app.database.connection import get_db
 from app.models.resume import Resume
 from app.models.user import User
@@ -402,6 +403,9 @@ def optimize_resume_with_ai(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Job description is empty after mapping to AI request",
         )
+
+    # Hidden weekly anti-abuse cap (raises 429 when exceeded). Admins bypass.
+    enforce_usage_limit(db, user, UsageFeature.resume_ai)
 
     ai_url = f"{get_ai_base_url()}/generate_resume"
     try:

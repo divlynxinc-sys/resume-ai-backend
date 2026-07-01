@@ -14,12 +14,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.config import UsageFeature
 from app.core.security import get_current_user
 from app.database.connection import get_db
 from app.models.resume import Resume
 from app.models.user import User
 from app.utils.ai_client import stream_from_ai_service
 from app.utils.resume_ai_adapter import backend_content_to_ai_request
+from app.utils.usage_limits import enforce_usage_limit
 
 
 router = APIRouter(prefix="/qa-answers", tags=["Q&A Answers"])
@@ -83,6 +85,9 @@ def generate_qa_answers(
     elif body.resume_text and body.resume_text.strip():
         payload["resume_text"] = body.resume_text.strip()
     # resume is optional for Q&A — the model can answer from the job description alone.
+
+    # Hidden weekly anti-abuse cap (raises 429 when exceeded). Admins bypass.
+    enforce_usage_limit(db, user, UsageFeature.qa_answers)
 
     # Prime the first chunk inside the handler so a connection error surfaces as a
     # clean 502 *before* the streaming response (and 200 status) has started.
