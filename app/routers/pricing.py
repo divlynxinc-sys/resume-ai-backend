@@ -31,10 +31,16 @@ def choose_plan(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
-    """User selects a plan (updates their plan_id). No payment - for demo/simple flow."""
+    """User selects a free plan (updates their plan_id). Paid plans must go through
+    Polar checkout (`/payments/polar/checkout`) so a real payment is verified first."""
     plan = db.query(PricingPlan).filter(PricingPlan.id == plan_id, PricingPlan.is_active == True).first()  # noqa: E712
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    if plan.price and plan.price > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Paid plans require checkout. Use /payments/polar/checkout instead.",
+        )
     user.plan_id = plan.id
     user.credits_remaining = plan.credits  # Reset to plan credits on choose
     db.add(user)
