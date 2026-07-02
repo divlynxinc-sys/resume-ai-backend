@@ -22,7 +22,7 @@ def _send_via_resend(to_email: str, subject: str, html_body: str) -> bool:
         return False
     try:
         resend.api_key = api_key
-        from_email = os.getenv("RESEND_FROM_EMAIL", "noreply@jobsynk.com")
+        from_email = os.getenv("RESEND_FROM_EMAIL", "JobSynkai <noreply@jobsynk.co>")
         resend.Emails.send({
             "from": from_email,
             "to": [to_email],
