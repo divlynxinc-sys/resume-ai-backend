@@ -37,6 +37,7 @@ class PolarSettings:
             for o in os.getenv(
                 "POLAR_ALLOWED_ORIGINS",
                 "http://localhost:5173,http://127.0.0.1:5173,"
+                "https://jobsynk.co,https://www.jobsynk.co,"
                 "https://resume-ai-frontend-beta.vercel.app",
             ).split(",")
             if o.strip()
