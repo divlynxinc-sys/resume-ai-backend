@@ -43,6 +43,10 @@ class PolarSettings:
             if o.strip()
         )
     )
+    # Optional Polar discount UUID applied to every checkout (e.g. the 50%-off
+    # launch offer). Leave empty to charge full price. Create the discount in the
+    # Polar dashboard, then set POLAR_DISCOUNT_ID to its id.
+    discount_id: str = os.getenv("POLAR_DISCOUNT_ID", "")
     # Map plan slug -> Polar product UUID. Set one env var per plan.
     product_ids: Dict[str, str] = field(
         default_factory=lambda: {

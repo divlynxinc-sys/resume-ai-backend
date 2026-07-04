@@ -102,21 +102,24 @@ def create_polar_checkout(
             detail=f"Polar product not configured for plan '{plan.slug}'",
         )
 
+    checkout_request: dict = {
+        "products": [product_id],
+        "success_url": _resolve_success_url(request),
+        "customer_email": user.email,
+        "external_customer_id": str(user.id),
+        "metadata": {
+            "user_id": str(user.id),
+            "plan_id": str(plan.id),
+            "plan_slug": plan.slug,
+        },
+    }
+    # Launch offer etc.: pre-apply a Polar discount to the checkout when configured.
+    if polar_settings.discount_id:
+        checkout_request["discount_id"] = polar_settings.discount_id
+
     try:
         polar = get_polar()
-        checkout = polar.checkouts.create(
-            request={
-                "products": [product_id],
-                "success_url": _resolve_success_url(request),
-                "customer_email": user.email,
-                "external_customer_id": str(user.id),
-                "metadata": {
-                    "user_id": str(user.id),
-                    "plan_id": str(plan.id),
-                    "plan_slug": plan.slug,
-                },
-            }
-        )
+        checkout = polar.checkouts.create(request=checkout_request)
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
