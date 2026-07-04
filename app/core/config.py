@@ -63,6 +63,26 @@ class Roles:
     admin = "admin"
 
 
+class SubscriptionState:
+    """
+    Local entitlement state for a user's subscription (source of truth for access;
+    Polar remains source of truth for billing/refunds). Stored on users.subscription_state.
+
+    - active:             paying, full paid-feature access.
+    - canceled_reserved:  canceled past the money-back window — paid features BLOCKED
+                          now, but the user may re-subscribe for free until
+                          subscription_period_end (then it expires).
+    - canceled_refunded:  canceled within the money-back window — refunded and revoked
+                          immediately, blocked, NO free re-subscribe.
+    - expired:            period ended / revoked by Polar; must repurchase.
+    """
+
+    active = "active"
+    canceled_reserved = "canceled_reserved"
+    canceled_refunded = "canceled_refunded"
+    expired = "expired"
+
+
 class UsageFeature:
     """Keys for the hidden per-user weekly AI usage caps (see app.utils.usage_limits)."""
 
@@ -113,7 +133,39 @@ class UsageLimitSettings:
     )
 
 
+@dataclass(frozen=True)
+class RefundSettings:
+    """
+    Money-back / cancellation policy, per plan.
+
+    When a user cancels a paid subscription within `refund_window_days[plan_slug]`
+    of the current period starting, they get a 100% automatic refund and are
+    revoked immediately. Cancel after that window: no refund, paid features are
+    blocked immediately, but the user may re-subscribe for free until the original
+    period end (a "reservation") — the subscription still expires on its original
+    date and never renews.
+
+    The 3-month plan's 7-day window is the "7-day money-back free trial" advertised
+    on the pricing card; weekly/monthly use a 1-day window. All env-overridable.
+    """
+
+    refund_window_days: Dict[str, int] = field(
+        default_factory=lambda: {
+            "weekly": _int_env("REFUND_WINDOW_WEEKLY", 1),
+            "monthly": _int_env("REFUND_WINDOW_MONTHLY", 1),
+            "three_months": _int_env("REFUND_WINDOW_THREE_MONTHS", 7),
+        }
+    )
+
+    def window_for(self, plan_slug: str | None) -> int:
+        """Refund/money-back window in days for a plan (0 = no money-back)."""
+        if not plan_slug:
+            return 0
+        return self.refund_window_days.get(plan_slug, 0)
+
+
 jwt_settings = JwtSettings()
 polar_settings = PolarSettings()
 usage_limit_settings = UsageLimitSettings()
+refund_settings = RefundSettings()
 

@@ -1,10 +1,11 @@
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.config import polar_settings
+from app.core.config import polar_settings, SubscriptionState
 from app.database.connection import get_db
 from app.models.pricing_plan import PricingPlan
 from app.models.user import User
@@ -94,17 +95,50 @@ async def polar_webhook(request: Request, db: Session = Depends(get_db)):
         if user and plan:
             user.plan_id = plan.id
             user.credits_remaining = SUBSCRIPTION_CREDIT_TOPUP
+            user.subscription_state = SubscriptionState.active
+
+            # Subscription id + period window (present on subscription.* events;
+            # order.paid carries subscription_id). Refund window is measured from
+            # subscription_started_at, expiry/reservation from subscription_period_end.
+            sub_id = getattr(data, "subscription_id", None) or getattr(data, "id", None)
+            if sub_id:
+                user.polar_subscription_id = str(sub_id)
+            period_start = getattr(data, "current_period_start", None)
+            period_end = getattr(data, "current_period_end", None)
+            if period_start is not None:
+                user.subscription_started_at = period_start
+            elif user.subscription_started_at is None:
+                user.subscription_started_at = datetime.now(timezone.utc)
+            if period_end is not None:
+                user.subscription_period_end = period_end
+
+            # order.paid carries the charge we may later refund 100%.
+            if event_type == "order.paid":
+                order_id = getattr(data, "id", None)
+                order_amount = getattr(data, "total_amount", None)
+                if order_id:
+                    user.polar_order_id = str(order_id)
+                if isinstance(order_amount, int):
+                    user.polar_order_amount = order_amount
+
             db.add(user)
             db.commit()
             logger.info("Polar %s: activated plan %s for user %s", event_type, plan.slug, user.id)
         else:
             logger.warning("Polar %s: missing user/plan in metadata", event_type)
 
-    # Cancellation: revoke paid plan
-    elif event_type in ("subscription.canceled", "subscription.revoked"):
+    # Actual revocation (immediate cancel or period end reached): drop paid access.
+    # NOTE: we intentionally do NOT act on `subscription.canceled` (which fires when
+    # cancel-at-period-end is merely *scheduled*) — local state already reflects that,
+    # and clearing here would wrongly kill access early.
+    elif event_type == "subscription.revoked":
         if user:
             user.plan_id = None
             user.credits_remaining = 0
+            # Preserve an explicit refunded marker; otherwise the period simply ended.
+            if user.subscription_state != SubscriptionState.canceled_refunded:
+                user.subscription_state = SubscriptionState.expired
+            user.subscription_period_end = None
             db.add(user)
             db.commit()
             logger.info("Polar %s: cleared plan for user %s", event_type, user.id)

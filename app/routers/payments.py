@@ -6,12 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.config import Roles, polar_settings
+from app.core.config import Roles, SubscriptionState, polar_settings, refund_settings
 from app.core.security import require_roles
 from app.database.connection import get_db
 from app.models.pricing_plan import PricingPlan
 from app.models.user import User
 from app.utils.polar_client import get_polar, get_product_id_for_slug
+from app.utils.subscription import can_reactivate_free, has_paid_access, refund_eligible_now
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class PolarSyncResponse(BaseModel):
 
 
 class PolarSubscriptionDetails(BaseModel):
-    """Live subscription state straight from Polar (used by the account settings UI)."""
+    """Subscription state for the account settings UI (local-first, money-back aware)."""
     has_subscription: bool
     subscription_id: Optional[str] = None
     plan_name: Optional[str] = None
@@ -63,6 +64,31 @@ class PolarSubscriptionDetails(BaseModel):
     status: Optional[str] = None
     current_period_end: Optional[datetime] = None
     cancel_at_period_end: bool = False
+    # Money-back / reservation extensions:
+    state: Optional[str] = None
+    # True while canceling now would trigger a 100% refund (within money-back window).
+    refund_eligible_now: bool = False
+    # Money-back window length (days) for the current plan — for cancel-modal copy.
+    refund_window_days: int = 0
+    # True when a canceled user may re-subscribe for free (reserved, not yet expired).
+    can_reactivate_free: bool = False
+    # When the reservation / access ends (original period end).
+    reserved_until: Optional[datetime] = None
+
+
+class PolarCancelResponse(BaseModel):
+    refunded: bool
+    message: str
+    state: str
+    reserved_until: Optional[datetime] = None
+
+
+class PolarReactivateResponse(BaseModel):
+    reactivated: bool
+    message: str
+    current_plan: Optional[str] = None
+    plan_slug: Optional[str] = None
+    reserved_until: Optional[datetime] = None
 
 
 class PolarSwitchRequest(BaseModel):
@@ -241,10 +267,12 @@ def sync_polar_subscription(
     active_sub = _get_active_subscription(user.id, user.email)
 
     if not active_sub:
-        # No active subscription on Polar's side — clear local plan if previously set.
-        if user.plan_id is not None:
+        # No active subscription on Polar's side. Don't stomp a local reservation:
+        # a canceled_reserved user still has a free-reactivate window we track locally.
+        if user.plan_id is not None and user.subscription_state != SubscriptionState.canceled_reserved:
             user.plan_id = None
             user.credits_remaining = 0
+            user.subscription_state = SubscriptionState.expired
             db.add(user)
             db.commit()
             logger.info("Polar sync: cleared plan for user %s (no active sub)", user.id)
@@ -277,6 +305,19 @@ def sync_polar_subscription(
 
     user.plan_id = plan.id
     user.credits_remaining = SUBSCRIPTION_CREDIT_TOPUP
+    # Only (re)activate from sync when the sub isn't locally reserved/refunded — sync
+    # must not silently undo a cancellation the user just made.
+    if user.subscription_state in (None, SubscriptionState.active, SubscriptionState.expired):
+        user.subscription_state = SubscriptionState.active
+        sub_id = getattr(active_sub, "id", None)
+        if sub_id:
+            user.polar_subscription_id = str(sub_id)
+        period_start = getattr(active_sub, "current_period_start", None)
+        period_end = getattr(active_sub, "current_period_end", None)
+        if period_start is not None:
+            user.subscription_started_at = period_start
+        if period_end is not None:
+            user.subscription_period_end = period_end
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -296,29 +337,70 @@ def get_polar_subscription(
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
     """
-    Live subscription state straight from Polar — used by the account settings page
-    to render the current plan, renewal date, and whether the user already requested
-    cancellation. Does NOT mutate local DB.
+    Subscription state for the account settings page — local-first, so it reflects
+    the money-back / reservation states Polar doesn't know about (blocked-but-reserved,
+    refunded). Renders plan, period end, cancellation state, whether canceling now
+    refunds, and whether a canceled user can re-subscribe for free.
     """
-    active_sub = _get_active_subscription(user.id, user.email)
-    if not active_sub:
-        return PolarSubscriptionDetails(has_subscription=False)
+    # No subscription history at all.
+    if not user.plan_id and user.subscription_state in (None, SubscriptionState.expired):
+        return PolarSubscriptionDetails(has_subscription=False, state=user.subscription_state)
 
-    product_id = getattr(active_sub, "product_id", None)
-    slug = _slug_for_product_id(product_id) if product_id else None
-    plan_name = None
-    if slug:
-        plan = db.query(PricingPlan).filter(PricingPlan.slug == slug).first()
-        plan_name = plan.name if plan else None
+    plan = db.query(PricingPlan).filter(PricingPlan.id == user.plan_id).first() if user.plan_id else None
+    slug = plan.slug if plan else None
+    state = user.subscription_state
+    reserved = state == SubscriptionState.canceled_reserved
 
     return PolarSubscriptionDetails(
-        has_subscription=True,
-        subscription_id=getattr(active_sub, "id", None),
-        plan_name=plan_name,
+        has_subscription=has_paid_access(user) or reserved,
+        subscription_id=user.polar_subscription_id,
+        plan_name=plan.name if plan else None,
         plan_slug=slug,
-        status=getattr(active_sub, "status", None),
-        current_period_end=getattr(active_sub, "current_period_end", None),
-        cancel_at_period_end=bool(getattr(active_sub, "cancel_at_period_end", False)),
+        status=state,
+        current_period_end=user.subscription_period_end,
+        # "Cancellation scheduled" in the UI keys off this — true once reserved.
+        cancel_at_period_end=reserved,
+        state=state,
+        refund_eligible_now=(state == SubscriptionState.active and refund_eligible_now(user, slug)),
+        refund_window_days=refund_settings.window_for(slug),
+        can_reactivate_free=can_reactivate_free(user),
+        reserved_until=user.subscription_period_end if reserved else None,
+    )
+
+
+@router.post("/polar/reactivate", response_model=PolarReactivateResponse)
+def reactivate_polar_subscription(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Roles.user, Roles.admin)),
+):
+    """
+    Free re-subscribe within the reserved window: a user who canceled past the
+    money-back window may restore paid access for free until the original period
+    end (no charge, no new checkout). The subscription still expires on its original
+    date because Polar keeps cancel-at-period-end set.
+    """
+    if not can_reactivate_free(user):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "must_repurchase",
+                "message": "Your reservation has ended. Please choose a plan to subscribe again.",
+            },
+        )
+
+    user.subscription_state = SubscriptionState.active
+    user.credits_remaining = SUBSCRIPTION_CREDIT_TOPUP
+    db.add(user)
+    db.commit()
+
+    plan = db.query(PricingPlan).filter(PricingPlan.id == user.plan_id).first() if user.plan_id else None
+    logger.info("Polar reactivate (free): user %s restored plan until period end", user.id)
+    return PolarReactivateResponse(
+        reactivated=True,
+        message="Your plan is active again until the end of your current period.",
+        current_plan=plan.name if plan else None,
+        plan_slug=plan.slug if plan else None,
+        reserved_until=user.subscription_period_end,
     )
 
 
@@ -381,6 +463,7 @@ def switch_polar_plan(
 
     user.plan_id = plan.id
     user.credits_remaining = SUBSCRIPTION_CREDIT_TOPUP
+    user.subscription_state = SubscriptionState.active
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -394,38 +477,82 @@ def switch_polar_plan(
     )
 
 
-@router.post("/polar/cancel", response_model=PolarSubscriptionDetails)
+@router.post("/polar/cancel", response_model=PolarCancelResponse)
 def cancel_polar_subscription(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
     """
-    Cancel the user's subscription at the end of the current billing period.
-    The user keeps access until `current_period_end` (the webhook clears the
-    plan when Polar fires `subscription.revoked`). We don't touch plan_id here.
+    Cancel with money-back policy:
+
+    - Within the plan's money-back window (weekly/monthly: 1 day, 3-month: 7 days):
+      issue a 100% refund via Polar and revoke the subscription immediately.
+    - After the window: no refund. Paid features are blocked immediately, but the
+      subscription is *reserved* — the user can re-subscribe for free (see
+      /polar/reactivate) until the original period end, and it expires on that date
+      (Polar keeps cancel-at-period-end set so it never renews).
     """
-    active_sub = _get_active_subscription(user.id, user.email)
-    if not active_sub:
+    if user.subscription_state != SubscriptionState.active or not user.plan_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No active subscription to cancel.",
         )
 
-    if getattr(active_sub, "cancel_at_period_end", False):
-        # Already scheduled — return current state, no-op.
-        return PolarSubscriptionDetails(
-            has_subscription=True,
-            subscription_id=getattr(active_sub, "id", None),
-            status=getattr(active_sub, "status", None),
-            current_period_end=getattr(active_sub, "current_period_end", None),
-            cancel_at_period_end=True,
-            plan_slug=_slug_for_product_id(getattr(active_sub, "product_id", "")),
+    plan = db.query(PricingPlan).filter(PricingPlan.id == user.plan_id).first()
+    slug = plan.slug if plan else None
+    sub_id = user.polar_subscription_id
+    if not sub_id:
+        # Fall back to Polar lookup if we never captured the id (legacy subs).
+        active_sub = _get_active_subscription(user.id, user.email)
+        sub_id = getattr(active_sub, "id", None) if active_sub else None
+    if not sub_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active subscription to cancel.",
         )
 
+    polar = get_polar()
+    within_window = refund_eligible_now(user, slug)
+
+    if within_window:
+        # 100% refund of the latest order, then revoke access immediately.
+        try:
+            if user.polar_order_id and user.polar_order_amount:
+                polar.refunds.create(
+                    request={
+                        "order_id": user.polar_order_id,
+                        "reason": "satisfaction_guarantee",
+                        "amount": int(user.polar_order_amount),
+                        "revoke_benefits": True,
+                        "comment": "Automatic money-back-window refund on cancellation.",
+                    }
+                )
+            polar.subscriptions.revoke(id=sub_id)
+        except Exception as exc:
+            logger.exception("Polar refund/revoke failed for user %s", user.id)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Cancellation with refund failed: {exc}",
+            )
+
+        user.subscription_state = SubscriptionState.canceled_refunded
+        user.plan_id = None
+        user.credits_remaining = 0
+        user.subscription_period_end = None
+        db.add(user)
+        db.commit()
+        logger.info("Polar cancel: user %s refunded 100%% and revoked (within window)", user.id)
+        return PolarCancelResponse(
+            refunded=True,
+            state=SubscriptionState.canceled_refunded,
+            message="Your plan was cancelled and you've been refunded in full.",
+        )
+
+    # Past the window: no refund. Stop renewal in Polar, block access now, reserve
+    # the free-reactivate window until the original period end.
     try:
-        polar = get_polar()
-        updated = polar.subscriptions.update(
-            id=active_sub.id,
+        polar.subscriptions.update(
+            id=sub_id,
             subscription_update={"cancel_at_period_end": True},
         )
     except Exception as exc:
@@ -435,14 +562,19 @@ def cancel_polar_subscription(
             detail=f"Polar cancel failed: {exc}",
         )
 
-    logger.info("Polar cancel: user %s scheduled cancellation at period end", user.id)
-    return PolarSubscriptionDetails(
-        has_subscription=True,
-        subscription_id=getattr(updated, "id", None),
-        plan_slug=_slug_for_product_id(getattr(updated, "product_id", "")),
-        status=getattr(updated, "status", None),
-        current_period_end=getattr(updated, "current_period_end", None),
-        cancel_at_period_end=True,
+    user.subscription_state = SubscriptionState.canceled_reserved
+    user.credits_remaining = 0
+    db.add(user)
+    db.commit()
+    logger.info("Polar cancel: user %s blocked now, reserved until period end (no refund)", user.id)
+    return PolarCancelResponse(
+        refunded=False,
+        state=SubscriptionState.canceled_reserved,
+        reserved_until=user.subscription_period_end,
+        message=(
+            "Your plan is cancelled and paid features are now locked. You can "
+            "re-subscribe for free anytime until your current period ends."
+        ),
     )
 
 

@@ -22,6 +22,18 @@ FastAPI + SQLAlchemy + Alembic + Postgres. Sits between the React frontend (`../
 2. **Hidden weekly usage caps (429)** — anti-abuse, applies to everyone incl. paid (admins bypass). `enforce_usage_limit(db, user, feature)` in `app/utils/usage_limits.py`, called in all four AI endpoints after input validation, before the AI call (records the event up front). Rolling window (`USAGE_WINDOW_DAYS`, default 7), one `ai_usage_events` row per generation. Cap = base per feature (`USAGE_LIMIT_*`, default 20) × plan multiplier (`USAGE_MULT_*`: free/weekly ×1, monthly ×2, three_months ×3). Returns `429 {code: "usage_limit_reached", feature, resets_at}`. **Counts generations, not tokens** — no token metering exists anywhere. Tune via env vars, no deploy needed.
 3. **`users.credits_remaining`** — display-only balance set on purchase; never decremented by AI use. Do not build logic on it.
 
+### Subscription lifecycle & money-back policy (added 2026-07-04)
+
+Local DB is the source of truth for **access**; Polar for **billing/refunds**. State lives on `users.subscription_state` (`app.core.config.SubscriptionState`: `active` | `canceled_reserved` | `canceled_refunded` | `expired`) plus `polar_subscription_id`, `polar_order_id`, `polar_order_amount`, `subscription_started_at`, `subscription_period_end`. Entitlement is computed by `app/utils/subscription.py::has_paid_access` (used by `require_paid_plan` AND the account-summary `current_plan`, so canceled-but-reserved users are correctly gated). Migration `i6d7e8f9a0b1` backfills existing plan holders to `active`.
+
+Cancel policy (`POST /payments/polar/cancel`, per plan money-back window in `RefundSettings`: weekly/monthly **1 day**, three_months **7 days**, env `REFUND_WINDOW_*`):
+- **Within window** → `refunds.create(order_id, satisfaction_guarantee, amount=order total, revoke_benefits=True)` + `subscriptions.revoke()` (immediate). State → `canceled_refunded`, plan cleared. Refund is **automatic**.
+- **Past window** → `subscriptions.update(cancel_at_period_end=True)` (no renewal) + block access **now**. State → `canceled_reserved`, `plan_id` kept. User keeps a free-reactivate window until `subscription_period_end`.
+
+`POST /payments/polar/reactivate` — free re-subscribe for a `canceled_reserved` user before `subscription_period_end` (flips state back to `active`, no charge; Polar stays cancel-at-period-end so it still expires on the original date). Returns 409 `must_repurchase` once the window has passed.
+
+Webhook: only `subscription.revoked` clears access (period truly ended / immediate revoke) → `expired`. `subscription.canceled` (scheduled) is intentionally ignored so it doesn't kill access early. `/polar/subscription` is now **local-first** and exposes `state`, `refund_eligible_now`, `refund_window_days`, `can_reactivate_free`, `reserved_until` for the settings UI.
+
 Feature keys (`UsageFeature` in `config.py`): `resume_ai`, `cover_letter`, `qa_answers`, `hr_email`.
 
 ## Payments (Polar)

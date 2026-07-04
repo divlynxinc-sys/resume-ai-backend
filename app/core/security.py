@@ -51,16 +51,18 @@ def require_paid_plan() -> Callable[[User], User]:
     it as a generic error. Admins always pass through.
     """
     def _checker(user: User = Depends(get_current_user)) -> User:
-        if (user.role or Roles.user) == Roles.admin:
+        # Entitlement is state-aware: a canceled-but-reserved or refunded user has a
+        # plan_id but no live access until they reactivate/repurchase.
+        from app.utils.subscription import has_paid_access
+
+        if has_paid_access(user):
             return user
-        if not user.plan_id:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail={
-                    "code": "requires_plan",
-                    "message": "This feature requires an active subscription.",
-                },
-            )
-        return user
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "requires_plan",
+                "message": "This feature requires an active subscription.",
+            },
+        )
     return _checker
 

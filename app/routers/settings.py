@@ -74,8 +74,12 @@ def get_account_summary(
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
     """Get account summary (plan name requires DB)."""
+    # current_plan drives the frontend's isPaid gate, so only report it when the
+    # user actually has live paid access (not canceled-reserved / refunded).
+    from app.utils.subscription import has_paid_access
+
     plan_name = None
-    if user.plan_id:
+    if user.plan_id and has_paid_access(user):
         plan = db.query(PricingPlan).filter(PricingPlan.id == user.plan_id).first()
         if plan:
             plan_name = plan.name

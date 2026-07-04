@@ -22,6 +22,18 @@ class User(Base):
     linkedin_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     portfolio_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("pricing_plans.id", ondelete="SET NULL"), nullable=True)
+    # Subscription lifecycle (see app.core.config.SubscriptionState). Local source of
+    # truth for paid-feature entitlement; Polar stays source of truth for billing.
+    subscription_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Polar identifiers needed to refund / cancel / reactivate.
+    polar_subscription_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    polar_order_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Latest order total in the currency's minor unit (cents), for a 100% refund.
+    polar_order_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Start of the current paid period — the money-back window is measured from here.
+    subscription_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Original period end — the reservation boundary for free re-subscribe / expiry.
+    subscription_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # OTP login fields
     otp_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
