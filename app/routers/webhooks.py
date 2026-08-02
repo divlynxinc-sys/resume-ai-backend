@@ -60,7 +60,18 @@ async def polar_webhook(request: Request, db: Session = Depends(get_db)):
     Receive and verify Polar webhooks (Standard Webhooks spec).
 
     Configure the endpoint in Polar dashboard -> Settings -> Webhooks and
-    subscribe to: subscription.active, subscription.canceled, order.paid.
+    subscribe to exactly the events this handler acts on:
+      - subscription.active, subscription.created, order.paid  -> grant/refresh access
+      - subscription.revoked                                   -> clear access
+
+    `subscription.revoked` is REQUIRED: it is the only event that drops paid
+    access, so without it cancelled plans never expire in our DB.
+
+    Do NOT rely on `subscription.canceled` — it fires when cancel-at-period-end is
+    merely *scheduled* and is deliberately ignored below (see the note at the
+    `subscription.revoked` branch). Subscribing to it is harmless; subscribing to
+    it *instead of* the events above is not.
+
     Set POLAR_WEBHOOK_SECRET to the secret shown when creating the endpoint.
     """
     if not polar_settings.webhook_secret:
@@ -97,10 +108,18 @@ async def polar_webhook(request: Request, db: Session = Depends(get_db)):
             user.credits_remaining = SUBSCRIPTION_CREDIT_TOPUP
             user.subscription_state = SubscriptionState.active
 
-            # Subscription id + period window (present on subscription.* events;
-            # order.paid carries subscription_id). Refund window is measured from
-            # subscription_started_at, expiry/reservation from subscription_period_end.
-            sub_id = getattr(data, "subscription_id", None) or getattr(data, "id", None)
+            # Subscription id + period window. On subscription.* events the payload
+            # *is* the subscription, so its id is `data.id`; on order.paid the
+            # subscription is a separate field and `data.id` is the ORDER id.
+            # Never fall back to `data.id` on order.paid — writing an order id into
+            # polar_subscription_id makes every later subscriptions.revoke()/.update()
+            # target a non-existent subscription, so the user can never cancel (502)
+            # while their money-back window quietly expires. An absent subscription_id
+            # on order.paid means it isn't a subscription order: skip, don't guess.
+            if event_type == "order.paid":
+                sub_id = getattr(data, "subscription_id", None)
+            else:
+                sub_id = getattr(data, "id", None)
             if sub_id:
                 user.polar_subscription_id = str(sub_id)
             period_start = getattr(data, "current_period_start", None)

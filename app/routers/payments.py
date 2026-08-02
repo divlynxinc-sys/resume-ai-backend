@@ -514,10 +514,35 @@ def cancel_polar_subscription(
     polar = get_polar()
     within_window = refund_eligible_now(user, slug)
 
+    # `polar_order_amount` is an int in minor units, so 0 is a *legitimate* value
+    # (a 100%-discount order) and must not be read as "missing" — hence explicit
+    # None checks instead of a truthiness test.
+    has_order = user.polar_order_id is not None and user.polar_order_amount is not None
+    manual_refund_needed = False
+
+    if within_window and not has_order:
+        # Refund-eligible, but we can't identify the charge, so we cannot refund
+        # automatically. Do NOT revoke here: that would take access away *and*
+        # keep the money, with no way back (canceled_refunded also disqualifies
+        # free reactivate). Fall through to the reserve path instead — billing
+        # stops, the user can reactivate for free — and flag it for follow-up.
+        logger.error(
+            "Polar cancel: user %s is inside the money-back window but has no usable "
+            "order on file (order_id=%r amount=%r) — reserving instead of revoking; "
+            "issue this refund manually in the Polar dashboard.",
+            user.id,
+            user.polar_order_id,
+            user.polar_order_amount,
+        )
+        within_window = False
+        manual_refund_needed = True
+
     if within_window:
         # 100% refund of the latest order, then revoke access immediately.
         try:
-            if user.polar_order_id and user.polar_order_amount:
+            # A zero-amount order (fully discounted) has nothing to refund — skip
+            # the call, but still revoke: the user is owed no money.
+            if user.polar_order_amount:
                 polar.refunds.create(
                     request={
                         "order_id": user.polar_order_id,
@@ -572,7 +597,11 @@ def cancel_polar_subscription(
         state=SubscriptionState.canceled_reserved,
         reserved_until=user.subscription_period_end,
         message=(
-            "Your plan is cancelled and paid features are now locked. You can "
+            "Your plan is cancelled and you won't be billed again. We couldn't "
+            "process your refund automatically — please contact support and we'll "
+            "sort it out. You can re-subscribe for free until your current period ends."
+            if manual_refund_needed
+            else "Your plan is cancelled and paid features are now locked. You can "
             "re-subscribe for free anytime until your current period ends."
         ),
     )
