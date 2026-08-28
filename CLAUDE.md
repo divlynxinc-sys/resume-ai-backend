@@ -11,7 +11,7 @@ FastAPI + SQLAlchemy + Alembic + Postgres. Sits between the React frontend (`../
 
 ## Layout
 
-- `app/routers/` — one file per feature: `auth`, `resumes` (incl. `POST /resumes/{id}/ai/optimize`), `cover_letter`, `qa_answers`, `hr_email`, `export`, `payments` (Polar checkout/sync/switch/cancel/portal), `webhooks` (Polar), `pricing`, `dashboard`, `settings`, `profile`, `templates`, `admin`, `juno` (AI chat), `help_center`, `user_routes`.
+- `app/routers/` — one file per feature: `auth`, `resumes` (incl. `POST /resumes/{id}/ai/optimize`), `cover_letter`, `qa_answers`, `hr_email`, `interviews` (AI Interviews: `/interviews` + worker-only `/internal/interviews`, see below), `export`, `payments` (Polar checkout/sync/switch/cancel/portal), `webhooks` (Polar), `pricing`, `dashboard`, `settings`, `profile`, `templates`, `admin`, `juno` (AI chat), `help_center`, `user_routes`.
 - `app/models/` — `user` (has `plan_id`, `credits_remaining`, `role`), `pricing_plan`, `resume`, `ai_usage`, `ats_score`, `template`, `user_settings`, `session_tracking`, `juno_prompt`, `help_article`.
 - `app/core/` — `config.py` (settings incl. `UsageLimitSettings`, `PolarSettings`), `security.py` (JWT, `get_current_user`, `require_roles`, `require_paid_plan`).
 - `app/utils/` — `usage_limits.py`, `ai_client.py` (streaming proxy to AI service), `resume_ai_adapter.py` (backend resume content → AI request shape), `polar_client.py`.
@@ -34,7 +34,15 @@ Cancel policy (`POST /payments/polar/cancel`, per plan money-back window in `Ref
 
 Webhook: only `subscription.revoked` clears access (period truly ended / immediate revoke) → `expired`. `subscription.canceled` (scheduled) is intentionally ignored so it doesn't kill access early. `/polar/subscription` is now **local-first** and exposes `state`, `refund_eligible_now`, `refund_window_days`, `can_reactivate_free`, `reserved_until` for the settings UI.
 
-Feature keys (`UsageFeature` in `config.py`): `resume_ai`, `cover_letter`, `qa_answers`, `hr_email`.
+Feature keys (`UsageFeature` in `config.py`): `resume_ai`, `cover_letter`, `qa_answers`, `hr_email`, `ai_interviews` (base 10/week, counted on the first `POST /interviews/{id}/start`).
+
+## AI Interviews (live voice over LiveKit, added 2026-08-28)
+
+`routers/interviews.py` + `utils/interviews.py` + `utils/livekit_tokens.py` + `models/interview.py` (`interview_sessions`, migration `j7e8f9a0b1c2`). The backend never touches audio: it stores setup + a résumé snapshot (contact fields stripped), mints a LiveKit join token whose `RoomConfiguration` dispatches the `jobsynk-interviewer` worker (`../resumeai-AI/interview_agent`), receives the transcript on `POST /internal/interviews/{id}/finalize` (header `X-Interview-Agent-Key` = `INTERVIEW_AGENT_SECRET`), and builds the report in a `BackgroundTasks` job via AI `POST /interview/report` (validated/clamped in `_validate_report_payload`). States: `ready → in_progress → processing → report_ready | abandoned | failed`; `reconcile_stale()` self-heals on every read. Env: `LIVEKIT_URL/API_KEY/API_SECRET`, `INTERVIEW_AGENT_NAME`, `INTERVIEW_AGENT_SECRET`, `INTERVIEW_TOKEN_TTL_MINUTES`, `USAGE_LIMIT_AI_INTERVIEWS`. Dep: `livekit-api==1.2.1`.
+
+`POST /job-description/from-url` (`app/routers/job_description.py`, login-gated via `get_current_user` — **not** `require_paid_plan`, since ATS checker and the résumé builder are free) fetches a job-posting URL server-side and extracts its text, shared by every "paste or add a link" JD field in the app: cover letter, recruiter outreach, interview answers, ATS checker, résumé builder, AI interviews. SSRF guard in `app/utils/job_description_fetch.py` (resolves + blocks private/loopback/reserved IPs on the URL and every redirect hop), dep `beautifulsoup4`. Started as an AI-Interviews-only, paid-gated route (`/interviews/fetch-job-description`) then moved out the same day (2026-08-29) once the free-tier callers needed it too. Paste remains the primary, always-available path in every caller.
+
+**Local dev note**: `resumeai-backend/.env` needs `TURNSTILE_SECRET_KEY` or every login/signup 503s — as of 2026-08-29 it's set to Cloudflare's public test keypair (matches the frontend's test `VITE_TURNSTILE_SITE_KEY`), not the real one. Swap to real keys before anything resembling a production check.
 
 ## Payments (Polar)
 

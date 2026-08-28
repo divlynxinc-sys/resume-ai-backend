@@ -90,6 +90,8 @@ class UsageFeature:
     cover_letter = "cover_letter"
     qa_answers = "qa_answers"
     hr_email = "hr_email"
+    # Live voice mock interviews (LiveKit). Counted once per interview *start*.
+    ai_interviews = "ai_interviews"
 
 
 def _int_env(name: str, default: int) -> int:
@@ -120,6 +122,8 @@ class UsageLimitSettings:
             UsageFeature.cover_letter: _int_env("USAGE_LIMIT_COVER_LETTER", 20),
             UsageFeature.qa_answers: _int_env("USAGE_LIMIT_QA_ANSWERS", 20),
             UsageFeature.hr_email: _int_env("USAGE_LIMIT_HR_EMAIL", 20),
+            # Much lower base: one interview is ~15 min of STT + LLM + TTS.
+            UsageFeature.ai_interviews: _int_env("USAGE_LIMIT_AI_INTERVIEWS", 10),
         }
     )
 
@@ -164,7 +168,34 @@ class RefundSettings:
         return self.refund_window_days.get(plan_slug, 0)
 
 
+@dataclass(frozen=True)
+class LiveKitSettings:
+    """
+    LiveKit Cloud project used for AI Interviews (live voice). The backend only
+    MINTS ROOM TOKENS with these credentials; the interviewer itself is the
+    separate `resumeai-AI/interview_agent` worker, which connects to the same
+    project and is dispatched by `agent_name` when a candidate joins the room.
+
+    `agent_secret` is a shared secret the worker sends as `X-Interview-Agent-Key`
+    to the `/internal/interviews/...` endpoints (fetch context, post transcript).
+    Leave it empty to disable those endpoints entirely.
+    """
+
+    url: str = os.getenv("LIVEKIT_URL", "")
+    api_key: str = os.getenv("LIVEKIT_API_KEY", "")
+    api_secret: str = os.getenv("LIVEKIT_API_SECRET", "")
+    agent_name: str = os.getenv("INTERVIEW_AGENT_NAME", "jobsynk-interviewer")
+    agent_secret: str = os.getenv("INTERVIEW_AGENT_SECRET", "")
+    # A join token only needs to outlive the interview itself.
+    token_ttl_minutes: int = _int_env("INTERVIEW_TOKEN_TTL_MINUTES", 45)
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.url and self.api_key and self.api_secret)
+
+
 jwt_settings = JwtSettings()
+livekit_settings = LiveKitSettings()
 polar_settings = PolarSettings()
 usage_limit_settings = UsageLimitSettings()
 refund_settings = RefundSettings()
