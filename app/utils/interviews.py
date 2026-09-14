@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.database.connection import SessionLocal
 from app.models.interview import InterviewSession, InterviewStatus
 from app.utils.ai_client import get_ai_base_url, post_json
+from app.utils.interview_credits import refund_interview_credit
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,8 @@ def serialize_session(s: InterviewSession, *, include_transcript: bool = False) 
         "report": s.report,
         "error": s.error,
         "ended_reason": s.ended_reason,
+        # null | "charged" | "refunded" — lets the UI say "your credit was returned".
+        "credit_status": s.credit_status,
         "started_at": _iso(s.started_at),
         "processing_started_at": _iso(s.processing_started_at),
         "completed_at": _iso(s.completed_at),
@@ -118,6 +121,10 @@ def reconcile_stale(db: Session, s: InterviewSession) -> None:
     """
     Self-heal sessions whose worker never reported back. Called on every read so
     the frontend's refresh/poll always lands on a terminal, actionable state.
+
+    Both branches only fire when NO transcript ever arrived — the worker always
+    posts one when a room it ran closes — so the interview never happened on our
+    side and its credit goes back.
     """
     current = now()
     if s.status == InterviewStatus.processing and s.transcript is None:
@@ -126,6 +133,7 @@ def reconcile_stale(db: Session, s: InterviewSession) -> None:
             s.status = InterviewStatus.failed
             s.error = "The interviewer disconnected before the conversation was saved. Please start a new interview."
             s.completed_at = current
+            refund_interview_credit(db, s, "worker never delivered a transcript")
             db.commit()
     elif s.status == InterviewStatus.in_progress:
         started = _aware(s.started_at)
@@ -133,6 +141,8 @@ def reconcile_stale(db: Session, s: InterviewSession) -> None:
             s.status = InterviewStatus.abandoned
             s.ended_reason = s.ended_reason or "candidate_left"
             s.completed_at = current
+            if s.transcript is None:
+                refund_interview_credit(db, s, "no transcript from either side")
             db.commit()
 
 
@@ -160,6 +170,9 @@ def apply_finalize(db: Session, s: InterviewSession, transcript: List[Dict[str, 
     if usable_answer_turns(transcript) < MIN_ANSWER_TURNS:
         s.status = InterviewStatus.abandoned
         s.completed_at = now()
+        # The worker hit an error before any answer: our failure, not the candidate's.
+        if ended_reason == "error":
+            refund_interview_credit(db, s, "interviewer error before any answer")
         db.commit()
         return False
 

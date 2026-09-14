@@ -37,6 +37,15 @@ class InterviewStatus:
     deleted = "deleted"
 
 
+class InterviewCreditStatus:
+    """What happened to the interview credit this session consumed (NULL = none: not started yet, or an admin)."""
+
+    charged = "charged"
+    # Returned automatically because the interview never ran on our side (see
+    # app.utils.interview_credits.refund_interview_credit).
+    refunded = "refunded"
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -75,6 +84,10 @@ class InterviewSession(Base):
     answers: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # InterviewCreditStatus. Set on the first start; only ever moved by conditional
+    # UPDATEs in app.utils.interview_credits so a credit is charged/refunded once.
+    credit_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

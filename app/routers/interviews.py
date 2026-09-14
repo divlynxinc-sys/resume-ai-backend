@@ -1,13 +1,16 @@
 """
 AI Interviews — live voice mock interviews over LiveKit.
 
-Browser-facing router (`/interviews`, JWT + paid plan) and a worker-facing
+Browser-facing router (`/interviews`, JWT + interview credits) and a worker-facing
 router (`/internal/interviews`, shared secret) that the `interview_agent` uses to
 fetch its briefing and post the transcript back when the room ends.
 
-Flow: POST /interviews (setup + résumé snapshot) -> POST /{id}/start (usage cap,
-LiveKit token with agent dispatch) -> [room] -> POST /internal/{id}/finalize
-(transcript) -> background report -> GET /{id} polls until report_ready.
+Flow: POST /interviews (setup + résumé snapshot; needs >= 1 credit) -> POST
+/{id}/start (spends the credit, LiveKit token with agent dispatch) -> [room] ->
+POST /internal/{id}/finalize (transcript) -> background report -> GET /{id} polls
+until report_ready.
+
+Access is prepaid credits, not a subscription — see app.utils.interview_credits.
 """
 
 from __future__ import annotations
@@ -19,8 +22,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.config import UsageFeature, livekit_settings
-from app.core.security import get_current_user, require_paid_plan
+from app.core.config import Roles, livekit_settings
+from app.core.security import get_current_user, require_roles
 from app.database.connection import get_db
 from app.models.interview import InterviewSession, InterviewStatus
 from app.models.resume import Resume
@@ -32,6 +35,7 @@ from app.schemas.interview_schema import (
     InterviewStartResponse,
     LiveConnection,
 )
+from app.utils.interview_credits import charge_for_interview, require_available_credit
 from app.utils.interviews import (
     apply_finalize,
     generate_report,
@@ -43,7 +47,6 @@ from app.utils.interviews import (
 )
 from app.utils.livekit_tokens import interview_room_name, mint_interview_token, participant_identity
 from app.utils.resume_ai_adapter import backend_content_to_ai_request
-from app.utils.usage_limits import enforce_usage_limit
 
 
 router = APIRouter(prefix="/interviews", tags=["AI Interviews"])
@@ -83,13 +86,16 @@ def _get_owned(db: Session, user: User, session_id: str) -> InterviewSession:
 def create_interview(
     body: InterviewCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_paid_plan()),
+    user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
     if not livekit_settings.configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "interviews_unavailable", "message": "Live interviews are not available right now."},
         )
+    # 402 interview_credits_required now, rather than after setup + mic test.
+    # Nothing is spent until start.
+    require_available_credit(user)
 
     open_count = (
         db.query(func.count(InterviewSession.id))
@@ -171,16 +177,20 @@ def get_interview(session_id: str, db: Session = Depends(get_db), user: User = D
 
 
 @router.post("/{session_id}/start", response_model=InterviewStartResponse)
-def start_interview(session_id: str, db: Session = Depends(get_db), user: User = Depends(require_paid_plan())):
+def start_interview(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(Roles.user, Roles.admin)),
+):
     """
     Move ready -> in_progress and hand back a LiveKit join token. Idempotent while
-    in progress (a refresh re-issues a token for the same room without counting
-    another usage slot).
+    in progress (a refresh re-issues a token for the same room without spending
+    another credit).
     """
     s = _get_owned(db, user, session_id)
     if s.status == InterviewStatus.ready:
-        # Hidden weekly cap (429). Counted once, when the interview actually starts.
-        enforce_usage_limit(db, user, UsageFeature.ai_interviews)
+        # One credit, spent once, when the interview actually starts (402 if none).
+        charge_for_interview(db, user, s)
         s.status = InterviewStatus.in_progress
         s.started_at = now()
         s.room_name = s.room_name or interview_room_name(s.id)
@@ -224,8 +234,9 @@ def retry_interview(
     session_id: str,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
-    user: User = Depends(require_paid_plan()),
+    user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
+    # No charge: the interview's credit already covers its report, retries included.
     s = _get_owned(db, user, session_id)
     if s.status != InterviewStatus.failed:
         raise _state_conflict(s, "Only a failed interview can be retried.")

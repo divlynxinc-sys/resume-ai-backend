@@ -5,10 +5,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.config import polar_settings, SubscriptionState
+from app.core.config import interview_credit_settings, polar_settings, SubscriptionState
 from app.database.connection import get_db
 from app.models.pricing_plan import PricingPlan
 from app.models.user import User
+from app.utils.interview_credits import grant_pack, revoke_refunded_order
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,37 @@ def _resolve_user_and_plan(db: Session, event_data) -> tuple[Optional[User], Opt
     return user, plan
 
 
+def _credit_pack_of(event_data):
+    """The interview-credit pack an order is for, or None for any other order.
+
+    Keyed on the Polar product id (what was actually bought); checkout metadata
+    is only a fallback for an order payload without a product id.
+    """
+    pack = interview_credit_settings.pack_for_product(getattr(event_data, "product_id", None))
+    if pack:
+        return pack
+    md = _get_metadata(event_data)
+    if md.get("purchase") == "interview_credits" and not getattr(event_data, "product_id", None):
+        return interview_credit_settings.packs.get(str(md.get("pack") or ""))
+    return None
+
+
+def _order_user_id(event_data) -> Optional[int]:
+    md = _get_metadata(event_data)
+    customer = getattr(event_data, "customer", None)
+    raw = md.get("user_id") or getattr(customer, "external_id", None)
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _status_str(event_data) -> str:
+    raw = getattr(event_data, "status", None)
+    value = getattr(raw, "value", raw)
+    return str(value).lower() if value is not None else ""
+
+
 @router.post("/polar")
 async def polar_webhook(request: Request, db: Session = Depends(get_db)):
     """
@@ -63,6 +95,11 @@ async def polar_webhook(request: Request, db: Session = Depends(get_db)):
     subscribe to exactly the events this handler acts on:
       - subscription.active, subscription.created, order.paid  -> grant/refresh access
       - subscription.revoked                                   -> clear access
+      - order.refunded                                         -> take back a refunded
+                                                                  interview-credit pack
+
+    `order.paid` also grants AI Interview credit packs (one-time products); those
+    orders are handled first and never touch the subscription columns.
 
     `subscription.revoked` is REQUIRED: it is the only event that drops paid
     access, so without it cancelled plans never expire in our DB.
@@ -98,6 +135,34 @@ async def polar_webhook(request: Request, db: Session = Depends(get_db)):
     data = getattr(event, "data", None)
     if data is None:
         return Response(status_code=status.HTTP_202_ACCEPTED)
+
+    # AI Interview credit packs. Handled before the subscription branch so a pack
+    # order can never overwrite polar_order_id/amount — those identify the
+    # subscription charge the money-back cancel refunds.
+    if event_type in ("order.paid", "order.refunded"):
+        pack = _credit_pack_of(data)
+        if pack:
+            order_id = getattr(data, "id", None)
+            if event_type == "order.paid":
+                user_id = _order_user_id(data)
+                user_exists = user_id is not None and db.query(User.id).filter(User.id == user_id).first()
+                if order_id and user_exists:
+                    total = getattr(data, "total_amount", None)
+                    grant_pack(
+                        db,
+                        user_id=user_id,
+                        pack=pack,
+                        polar_order_id=str(order_id),
+                        amount_cents=total if isinstance(total, int) else None,
+                    )
+                else:
+                    logger.warning("Polar order.paid for %s: unknown user %r (order %s)", pack.key, user_id, order_id)
+            elif order_id and _status_str(data) == "refunded":
+                revoke_refunded_order(db, str(order_id))
+            elif order_id:
+                # Partial refunds are a support decision (how many credits?), not an automatic one.
+                logger.warning("Polar order.refunded for %s is partial (order %s) — adjust credits manually", pack.key, order_id)
+            return Response(status_code=status.HTTP_202_ACCEPTED)
 
     user, plan = _resolve_user_and_plan(db, data)
 
