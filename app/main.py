@@ -23,6 +23,9 @@ from app.routers.webhooks import router as webhooks_router
 from app.routers.cover_letter import router as cover_letter_router
 from app.routers.qa_answers import router as qa_answers_router
 from app.routers.hr_email import router as hr_email_router
+from app.routers.interviews import router as interviews_router, internal_router as interviews_internal_router
+from app.routers.interview_credits import router as interview_credits_router
+from app.routers.job_description import router as job_description_router
 from app.middleware.session import UserSessionMiddleware
 from app.core.swagger import setup_swagger
 
@@ -86,6 +89,10 @@ app.include_router(webhooks_router)
 app.include_router(cover_letter_router)
 app.include_router(qa_answers_router)
 app.include_router(hr_email_router)
+app.include_router(interviews_router)
+app.include_router(interviews_internal_router)
+app.include_router(interview_credits_router)
+app.include_router(job_description_router)
 
 @app.get("/")
 def root():

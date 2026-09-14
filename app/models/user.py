@@ -34,6 +34,10 @@ class User(Base):
     subscription_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Original period end — the reservation boundary for free re-subscribe / expiry.
     subscription_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Prepaid AI Interview credits (1 = one live interview + its report). Unlike
+    # credits_remaining this IS load-bearing: only app.utils.interview_credits may
+    # change it, and always with a matching interview_credit_transactions row.
+    interview_credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # OTP login fields
     otp_code: Mapped[str | None] = mapped_column(String(6), nullable=True)

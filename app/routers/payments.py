@@ -27,7 +27,7 @@ class PolarCheckoutRequest(BaseModel):
     plan_slug: str = Field(..., description="Slug of the pricing plan, e.g. 'weekly'")
 
 
-def _resolve_success_url(request: Request) -> str:
+def _resolve_success_url(request: Request, extra_query: str = "") -> str:
     """
     Build the post-checkout redirect URL, preferring the origin the checkout was
     started from (so a checkout begun on localhost returns to localhost, prod to
@@ -36,11 +36,18 @@ def _resolve_success_url(request: Request) -> str:
     This is what closes the dev gap: without it, every checkout redirects to the
     single hard-coded `POLAR_SUCCESS_URL`, so a local tester lands on the deployed
     site's /success page — which syncs the deployed DB, never their local one.
+
+    `extra_query` (e.g. "purchase=interview_credits") tells /success which kind
+    of purchase to confirm.
     """
     origin = (request.headers.get("origin") or "").rstrip("/")
     if origin and origin in polar_settings.allowed_success_origins:
-        return f"{origin}/success?checkout_id={{CHECKOUT_ID}}"
-    return polar_settings.success_url
+        url = f"{origin}/success?checkout_id={{CHECKOUT_ID}}"
+    else:
+        url = polar_settings.success_url
+    if extra_query:
+        url = f"{url}{'&' if '?' in url else '?'}{extra_query}"
+    return url
 
 
 class PolarCheckoutResponse(BaseModel):

@@ -84,7 +84,12 @@ class SubscriptionState:
 
 
 class UsageFeature:
-    """Keys for the hidden per-user weekly AI usage caps (see app.utils.usage_limits)."""
+    """Keys for the hidden per-user weekly AI usage caps (see app.utils.usage_limits).
+
+    AI Interviews are deliberately NOT here: they are prepaid per interview with
+    credits (see InterviewCreditSettings), so a hidden cap would block interviews
+    the user has already paid for.
+    """
 
     resume_ai = "resume_ai"
     cover_letter = "cover_letter"
@@ -164,7 +169,81 @@ class RefundSettings:
         return self.refund_window_days.get(plan_slug, 0)
 
 
+@dataclass(frozen=True)
+class CreditPack:
+    key: str
+    credits: int
+    # Display-only, in cents. Polar's product price is what is actually charged;
+    # keep the two (and src/lib/interview-credits.ts on the frontend) in sync.
+    price_cents: int
+    product_id: str
+
+
+@dataclass(frozen=True)
+class InterviewCreditSettings:
+    """
+    AI Interview credits — prepaid, one credit per live interview (the report,
+    and any report retry, is included). Sold as one-time Polar products, open to
+    every signed-in user whether or not they subscribe. Credits never expire.
+
+    One Polar one-time product per pack; set its UUID in the matching env var.
+    A pack whose product id is empty cannot be bought (checkout 503s).
+    Polar checkouts have no quantity field for regular products, so "more" means
+    buying the 3-credit pack again — balances simply stack.
+    """
+
+    packs: Dict[str, CreditPack] = field(
+        default_factory=lambda: {
+            "interview_3": CreditPack(
+                key="interview_3",
+                credits=3,
+                price_cents=1000,
+                product_id=os.getenv("POLAR_PRODUCT_INTERVIEW_CREDITS_3", ""),
+            ),
+            "interview_30": CreditPack(
+                key="interview_30",
+                credits=30,
+                price_cents=9000,
+                product_id=os.getenv("POLAR_PRODUCT_INTERVIEW_CREDITS_30", ""),
+            ),
+        }
+    )
+
+    def pack_for_product(self, product_id: str | None) -> CreditPack | None:
+        if not product_id:
+            return None
+        return next((p for p in self.packs.values() if p.product_id and p.product_id == product_id), None)
+
+
+@dataclass(frozen=True)
+class LiveKitSettings:
+    """
+    LiveKit Cloud project used for AI Interviews (live voice). The backend only
+    MINTS ROOM TOKENS with these credentials; the interviewer itself is the
+    separate `resumeai-AI/interview_agent` worker, which connects to the same
+    project and is dispatched by `agent_name` when a candidate joins the room.
+
+    `agent_secret` is a shared secret the worker sends as `X-Interview-Agent-Key`
+    to the `/internal/interviews/...` endpoints (fetch context, post transcript).
+    Leave it empty to disable those endpoints entirely.
+    """
+
+    url: str = os.getenv("LIVEKIT_URL", "")
+    api_key: str = os.getenv("LIVEKIT_API_KEY", "")
+    api_secret: str = os.getenv("LIVEKIT_API_SECRET", "")
+    agent_name: str = os.getenv("INTERVIEW_AGENT_NAME", "jobsynk-interviewer")
+    agent_secret: str = os.getenv("INTERVIEW_AGENT_SECRET", "")
+    # A join token only needs to outlive the interview itself.
+    token_ttl_minutes: int = _int_env("INTERVIEW_TOKEN_TTL_MINUTES", 45)
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.url and self.api_key and self.api_secret)
+
+
 jwt_settings = JwtSettings()
+interview_credit_settings = InterviewCreditSettings()
+livekit_settings = LiveKitSettings()
 polar_settings = PolarSettings()
 usage_limit_settings = UsageLimitSettings()
 refund_settings = RefundSettings()
