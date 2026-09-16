@@ -44,7 +44,11 @@ def signup_send_otp(payload: SignupOtpSend, request: Request, db: Session = Depe
     # A fresh challenge protects the first OTP request. Resends are allowed only
     # for an email that already established an OTP session.
     if payload.turnstile_token:
-        verify_turnstile(payload.turnstile_token, request.client.host if request.client else None)
+        verify_turnstile(
+            payload.turnstile_token,
+            request.client.host if request.client else None,
+            expected_actions={"signup"},
+        )
     elif email_normalized not in _signup_otps:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -137,7 +141,11 @@ def login(payload: UserLogin, request: Request, db: Session = Depends(get_db)):
     - POST /auth/login/otp/start
     - POST /auth/login/otp/verify
     """
-    verify_turnstile(payload.turnstile_token, request.client.host if request.client else None)
+    verify_turnstile(
+        payload.turnstile_token,
+        request.client.host if request.client else None,
+        expected_actions={"login"},
+    )
     email_normalized = payload.email.lower()
     user = db.query(User).filter(User.email == email_normalized, User.is_deleted == False).first()  # noqa: E712
     if not user:
@@ -237,7 +245,11 @@ def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depe
     - If the user doesn't exist, creates a new account.
     """
     # Verify the access token by fetching user info from Google
-    verify_turnstile(payload.turnstile_token, request.client.host if request.client else None)
+    verify_turnstile(
+        payload.turnstile_token,
+        request.client.host if request.client else None,
+        expected_actions={"login", "signup"},
+    )
     try:
         resp = httpx.get(
             "https://www.googleapis.com/oauth2/v3/userinfo",
@@ -256,6 +268,8 @@ def google_auth(payload: GoogleAuthRequest, request: Request, db: Session = Depe
 
     if not email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google account has no email")
+    if idinfo.get("email_verified") is not True:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google email is not verified")
 
     # 1. Check if user exists by google_sub
     user = db.query(User).filter(User.google_sub == google_sub, User.is_deleted == False).first()  # noqa: E712
