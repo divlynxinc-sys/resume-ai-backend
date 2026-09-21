@@ -82,7 +82,12 @@ def stream_from_ai_service(
 
     try:
         while True:
-            chunk = resp.read(256)
+            try:
+                chunk = resp.read(256)
+            except Exception as e:
+                # The AI service sends 200 before it calls the LLM, so an LLM failure
+                # arrives as a dropped stream, not an HTTP error.
+                raise RuntimeError(f"AI service stream failed: {e}")
             if not chunk:
                 break
             yield chunk

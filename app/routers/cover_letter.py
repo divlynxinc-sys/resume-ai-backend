@@ -7,15 +7,7 @@ client so users see tokens as they're produced (perceived speed >> wall-clock sp
 
 from __future__ import annotations
 
-import json
-import os
-from typing import Generator, Optional
-
-import urllib.error
-import urllib.request
-
-# Per-socket-operation timeout for the streaming AI call (see _stream_from_ai).
-AI_STREAM_TIMEOUT_SECONDS = int(os.getenv("AI_STREAM_TIMEOUT_SECONDS", "120"))
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -27,7 +19,7 @@ from app.core.security import get_current_user, require_paid_plan
 from app.database.connection import get_db
 from app.models.resume import Resume
 from app.models.user import User
-from app.utils.ai_client import get_ai_base_url
+from app.utils.ai_client import stream_from_ai_service
 from app.utils.resume_ai_adapter import backend_content_to_ai_request
 from app.utils.usage_limits import enforce_usage_limit
 
@@ -42,49 +34,6 @@ class CoverLetterRequest(BaseModel):
     tone: Optional[str] = "professional"
     company: Optional[str] = None
     role: Optional[str] = None
-
-
-def _stream_from_ai(payload: dict) -> Generator[bytes, None, None]:
-    url = f"{get_ai_base_url()}/generate_cover_letter"
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        # Per-socket-operation timeout (not a total deadline): tokens stream
-        # continuously once generation starts, so this only trips if the AI service
-        # accepts the connection but then stalls (e.g. hung model) — which would
-        # otherwise hang the request forever. Generous enough to absorb a cold model load.
-        resp = urllib.request.urlopen(req, timeout=AI_STREAM_TIMEOUT_SECONDS)
-    except urllib.error.HTTPError as e:
-        try:
-            body = e.read().decode("utf-8", errors="replace")
-        except Exception:
-            body = ""
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"AI service error {e.code}: {body or e.reason}",
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"AI service unreachable: {e}",
-        )
-
-    try:
-        while True:
-            chunk = resp.read(256)
-            if not chunk:
-                break
-            yield chunk
-    finally:
-        try:
-            resp.close()
-        except Exception:
-            pass
 
 
 @router.post("/generate")
@@ -137,8 +86,21 @@ def generate_cover_letter(
     # Hidden weekly anti-abuse cap (raises 429 when exceeded). Admins bypass.
     enforce_usage_limit(db, user, UsageFeature.cover_letter)
 
+    gen = stream_from_ai_service("/generate_cover_letter", payload)
+    try:
+        first = next(gen)
+    except StopIteration:
+        first = b""
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+    def body_stream():
+        if first:
+            yield first
+        yield from gen
+
     return StreamingResponse(
-        _stream_from_ai(payload),
+        body_stream(),
         media_type="text/plain; charset=utf-8",
         headers={"X-Accel-Buffering": "no"},
     )
