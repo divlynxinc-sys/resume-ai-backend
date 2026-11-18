@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import UsageFeature
@@ -29,14 +29,17 @@ router = APIRouter(prefix="/qa-answers", tags=["Q&A Answers"])
 
 class QAAnswersRequest(BaseModel):
     resume_id: Optional[int] = None
-    resume_text: Optional[str] = None
-    job_description: str
+    resume_text: Optional[str] = Field(default=None, max_length=20000)
+    job_description: str = Field(max_length=20000)
     tone: Optional[str] = "professional"
-    company: Optional[str] = None
-    role: Optional[str] = None
+    company: Optional[str] = Field(default=None, max_length=200)
+    role: Optional[str] = Field(default=None, max_length=200)
     interview_type: Optional[str] = "behavioral"
-    focus: Optional[str] = None
-    question_count: Optional[int] = 6
+    focus: Optional[str] = Field(default=None, max_length=2000)
+    # The AI service caps generation at 15 regardless of what's requested
+    # (confirmed with product); reject anything above that instead of
+    # silently truncating.
+    question_count: Optional[int] = Field(default=6, ge=1, le=15)
     questions: Optional[List[str]] = None
 
 
