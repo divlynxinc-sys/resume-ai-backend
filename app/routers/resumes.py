@@ -516,7 +516,7 @@ def get_ats_score(
 
 
 @router.get("/sections/definition")
-def section_definition(section: ResumeSection):
+def section_definition(section: ResumeSection, user: User = Depends(get_current_user)):
     # Minimal field definitions to drive a generic form in the UI
     definitions = {
         "info": [
