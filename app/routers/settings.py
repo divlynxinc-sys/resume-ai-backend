@@ -144,7 +144,9 @@ def delete_my_account(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
-    """Soft delete account - revokes tokens and marks user as deleted."""
+    """Soft delete account - revokes tokens, frees the email for reuse, and marks user as deleted."""
+    timestamp = int(datetime.now(timezone.utc).timestamp())
+    user.email = f"deleted+{user.id}+{timestamp}@deleted.invalid"
     user.is_deleted = True
     user.token_version = int(user.token_version or 1) + 1
     db.add(user)
