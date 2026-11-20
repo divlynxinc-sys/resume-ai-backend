@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.utils.turnstile import _is_production
+
 from app.routers.auth import router as auth_router
 from app.routers.profile import router as profile_router
 from app.routers.admin import router as admin_router
@@ -44,11 +46,20 @@ async def lifespan(app: FastAPI):
     yield
 
 
+_prod = _is_production()
+
 app = FastAPI(
     title="ResumeAI Backend",
     version="1.0.0",
     description="Backend APIs for the AI-powered resume builder.",
     lifespan=lifespan,
+    # FastAPI registers /docs, /redoc, /openapi.json at construction time, so
+    # these must be set here, not mutated on `app` afterward (setup_swagger
+    # used to do that -- it left /openapi.json public and broke /docs/redoc
+    # with 500s instead of removing them). None disables a route entirely.
+    docs_url=None if _prod else "/docs",
+    redoc_url=None if _prod else "/redoc",
+    openapi_url=None if _prod else "/openapi.json",
 )
 
 setup_swagger(app)

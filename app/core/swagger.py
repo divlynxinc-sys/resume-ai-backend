@@ -1,5 +1,3 @@
-import os
-
 from fastapi.openapi.utils import get_openapi
 
 tags_metadata = [
@@ -13,12 +11,9 @@ tags_metadata = [
 
 
 def setup_swagger(app):
-    # Configure docs paths and UI behavior. Disabled in production so the API
-    # schema isn't publicly readable; still available in local/dev.
-    is_production = os.getenv("APP_ENV", "local") == "production"
-    app.docs_url = None if is_production else "/docs"
-    app.redoc_url = None if is_production else "/redoc"
-    app.openapi_url = None if is_production else "/openapi.json"
+    # docs_url/redoc_url/openapi_url are set at FastAPI(...) construction time
+    # in main.py, not here -- FastAPI registers those routes when the app is
+    # built, so mutating app.docs_url afterward doesn't remove them.
     app.swagger_ui_parameters = {
         "persistAuthorization": True,
         "displayRequestDuration": True,
