@@ -11,10 +11,9 @@ tags_metadata = [
 
 
 def setup_swagger(app):
-    # Configure docs paths and UI behavior
-    app.docs_url = "/docs"
-    app.redoc_url = "/redoc"
-    app.openapi_url = "/openapi.json"
+    # docs_url/redoc_url/openapi_url are set at FastAPI(...) construction time
+    # in main.py, not here -- FastAPI registers those routes when the app is
+    # built, so mutating app.docs_url afterward doesn't remove them.
     app.swagger_ui_parameters = {
         "persistAuthorization": True,
         "displayRequestDuration": True,
