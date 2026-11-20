@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import UsageFeature
@@ -31,16 +31,28 @@ class QAAnswersRequest(BaseModel):
     resume_id: Optional[int] = None
     resume_text: Optional[str] = Field(default=None, max_length=20000)
     job_description: str = Field(max_length=20000)
-    tone: Optional[str] = "professional"
+    tone: Optional[str] = Field(default="professional", max_length=50)
     company: Optional[str] = Field(default=None, max_length=200)
     role: Optional[str] = Field(default=None, max_length=200)
-    interview_type: Optional[str] = "behavioral"
+    interview_type: Optional[str] = Field(default="behavioral", max_length=50)
     focus: Optional[str] = Field(default=None, max_length=2000)
     # The AI service caps generation at 15 regardless of what's requested
     # (confirmed with product); reject anything above that instead of
     # silently truncating.
     question_count: Optional[int] = Field(default=6, ge=1, le=15)
-    questions: Optional[List[str]] = None
+    # Mirrors question_count's cap and resume_text's intent: a custom question
+    # is user-typed, not a paragraph, so each one gets a small ceiling too.
+    questions: Optional[List[str]] = Field(default=None, max_length=15)
+
+    @field_validator("questions")
+    @classmethod
+    def _validate_question_items(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        for item in value:
+            if len(item) > 500:
+                raise ValueError("each question must be 500 characters or fewer")
+        return value
 
 
 @router.post("/generate")

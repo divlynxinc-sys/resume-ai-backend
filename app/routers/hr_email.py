@@ -31,10 +31,10 @@ class HREmailDraftsRequest(BaseModel):
     resume_id: Optional[int] = None
     resume_text: Optional[str] = Field(default=None, max_length=20000)
     job_description: Optional[str] = Field(default=None, max_length=20000)
-    tone: Optional[str] = "professional"
+    tone: Optional[str] = Field(default="professional", max_length=50)
     company: Optional[str] = Field(default=None, max_length=200)
     role: Optional[str] = Field(default=None, max_length=200)
-    email_type: Optional[str] = "application"
+    email_type: Optional[str] = Field(default="application", max_length=50)
     recipient_name: Optional[str] = Field(default=None, max_length=200)
     job_link: Optional[str] = Field(default=None, max_length=2000)
     date_applied: Optional[str] = Field(default=None, max_length=100)

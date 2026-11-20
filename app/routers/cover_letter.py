@@ -31,7 +31,7 @@ class CoverLetterRequest(BaseModel):
     resume_id: Optional[int] = None
     resume_text: Optional[str] = Field(default=None, max_length=20000)
     job_description: str = Field(max_length=20000)
-    tone: Optional[str] = "professional"
+    tone: Optional[str] = Field(default="professional", max_length=50)
     company: Optional[str] = Field(default=None, max_length=200)
     role: Optional[str] = Field(default=None, max_length=200)
 
