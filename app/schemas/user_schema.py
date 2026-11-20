@@ -1,10 +1,10 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class UserCreate(BaseModel):
-    name: str
+    name: str = Field(max_length=255)
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8, max_length=128)
 
 
 class SignupOtpSend(BaseModel):
@@ -19,13 +19,16 @@ class SignupOtpVerify(BaseModel):
 
 class UserLogin(BaseModel):
     email: EmailStr
-    password: str
+    # Upper bound only (no minimum) — this authenticates an existing password,
+    # it doesn't set one, so it must accept whatever length a user's current
+    # password already is.
+    password: str = Field(max_length=128)
     turnstile_token: str
 
 
 class OtpLoginStart(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=128)
 
 
 class OtpVerifyRequest(BaseModel):
@@ -75,9 +78,9 @@ class ProfileUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    old_password: str
-    new_password: str
-    confirm_password: str
+    old_password: str = Field(max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(max_length=128)
 
 
 class GoogleAuthRequest(BaseModel):

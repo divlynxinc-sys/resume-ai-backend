@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import UsageFeature
@@ -29,18 +29,18 @@ router = APIRouter(prefix="/hr-email-drafts", tags=["HR Email Drafts"])
 
 class HREmailDraftsRequest(BaseModel):
     resume_id: Optional[int] = None
-    resume_text: Optional[str] = None
-    job_description: Optional[str] = None
-    tone: Optional[str] = "professional"
-    company: Optional[str] = None
-    role: Optional[str] = None
-    email_type: Optional[str] = "application"
-    recipient_name: Optional[str] = None
-    job_link: Optional[str] = None
-    date_applied: Optional[str] = None
-    availability: Optional[str] = None
-    extra_context: Optional[str] = None
-    drafts: Optional[int] = 2
+    resume_text: Optional[str] = Field(default=None, max_length=20000)
+    job_description: Optional[str] = Field(default=None, max_length=20000)
+    tone: Optional[str] = Field(default="professional", max_length=50)
+    company: Optional[str] = Field(default=None, max_length=200)
+    role: Optional[str] = Field(default=None, max_length=200)
+    email_type: Optional[str] = Field(default="application", max_length=50)
+    recipient_name: Optional[str] = Field(default=None, max_length=200)
+    job_link: Optional[str] = Field(default=None, max_length=2000)
+    date_applied: Optional[str] = Field(default=None, max_length=100)
+    availability: Optional[str] = Field(default=None, max_length=500)
+    extra_context: Optional[str] = Field(default=None, max_length=2000)
+    drafts: Optional[int] = Field(default=2, ge=1, le=4)
 
 
 @router.post("/generate")
