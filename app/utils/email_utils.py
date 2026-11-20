@@ -83,3 +83,35 @@ def send_otp_email(to_email: str, otp_code: str, *, subject: Optional[str] = Non
         return
 
     print(f"[DEV] OTP for {to_email}: {otp_code}")
+
+
+def send_password_reset_email(to_email: str, reset_link: str) -> None:
+    html_template = _load_template("password_reset.html")
+    html_body = html_template.replace("{{RESET_LINK}}", reset_link)
+    subject = "Reset your Jobsynk AI password"
+    plain_text = f"Reset your password: {reset_link}\nThis link expires in 30 minutes."
+
+    if _send_via_resend(to_email, subject, html_body):
+        return
+    if _send_via_smtp(to_email, subject, html_body, plain_text):
+        return
+
+    print(f"[DEV] Password reset link for {to_email}: {reset_link}")
+
+
+def send_password_changed_email(to_email: str) -> None:
+    html_body = (
+        "<html><body style=\"font-family:sans-serif\">"
+        "<p>Your Jobsynk AI password was just changed.</p>"
+        "<p>If this wasn't you, contact support immediately.</p>"
+        "</body></html>"
+    )
+    subject = "Your Jobsynk AI password was changed"
+    plain_text = "Your Jobsynk AI password was just changed. If this wasn't you, contact support immediately."
+
+    if _send_via_resend(to_email, subject, html_body):
+        return
+    if _send_via_smtp(to_email, subject, html_body, plain_text):
+        return
+
+    print(f"[DEV] Password-changed notice for {to_email}")

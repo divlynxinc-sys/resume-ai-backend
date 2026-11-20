@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class UserCreate(BaseModel):
@@ -83,3 +83,13 @@ class PasswordChange(BaseModel):
 class GoogleAuthRequest(BaseModel):
     credential: str  # Google ID token from frontend
     turnstile_token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+    turnstile_token: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(max_length=256)
+    new_password: str = Field(min_length=8, max_length=128)
