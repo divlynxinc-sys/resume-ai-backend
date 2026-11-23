@@ -1,5 +1,6 @@
 import os
 import smtplib
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,9 @@ def _load_template(template_name: str) -> str:
     base_dir = Path(__file__).resolve().parent.parent
     template_path = base_dir / "email_templates" / template_name
     try:
-        return template_path.read_text(encoding="utf-8")
+        return template_path.read_text(encoding="utf-8").replace(
+            "{{YEAR}}", str(datetime.now(timezone.utc).year)
+        )
     except FileNotFoundError:
         return "<html><body><p>Your code is: <strong>{{OTP_CODE}}</strong></p></body></html>"
 
