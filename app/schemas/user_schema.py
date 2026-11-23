@@ -17,18 +17,19 @@ class SignupOtpVerify(BaseModel):
     otp_code: str
 
 
+CURRENT_PASSWORD_MAX_LENGTH = 1024
+
+
 class UserLogin(BaseModel):
     email: EmailStr
-    # Upper bound only (no minimum) — this authenticates an existing password,
-    # it doesn't set one, so it must accept whatever length a user's current
-    # password already is.
-    password: str = Field(max_length=128)
+    # Allow legacy passwords longer than the limit for new passwords.
+    password: str = Field(max_length=CURRENT_PASSWORD_MAX_LENGTH)
     turnstile_token: str
 
 
 class OtpLoginStart(BaseModel):
     email: EmailStr
-    password: str = Field(max_length=128)
+    password: str = Field(max_length=CURRENT_PASSWORD_MAX_LENGTH)
 
 
 class OtpVerifyRequest(BaseModel):
@@ -78,7 +79,7 @@ class ProfileUpdate(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    old_password: str = Field(max_length=128)
+    old_password: str = Field(max_length=CURRENT_PASSWORD_MAX_LENGTH)
     new_password: str = Field(min_length=8, max_length=128)
     confirm_password: str = Field(max_length=128)
 
