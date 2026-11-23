@@ -1,9 +1,11 @@
+import hashlib
 import os
+import secrets
 from datetime import datetime, timezone, timedelta
 import random
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.config import Roles
@@ -11,11 +13,13 @@ from app.core.security import require_roles
 from app.database.connection import get_db
 from app.models.user import User
 from app.schemas.user_schema import (
+    ForgotPasswordRequest,
     GoogleAuthRequest,
     OtpLoginStart,
     OtpStartResponse,
     OtpVerifyRequest,
     ProfileUpdate,
+    ResetPasswordRequest,
     SignupOtpSend,
     SignupOtpVerify,
     TokenPair,
@@ -25,8 +29,11 @@ from app.schemas.user_schema import (
     UserPublic,
 )
 from app.utils.auth_utils import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
-from app.utils.email_utils import send_otp_email
+from app.utils.email_utils import send_otp_email, send_password_changed_email, send_password_reset_email
 from app.utils.turnstile import verify_turnstile
+
+PASSWORD_RESET_COOLDOWN_SECONDS = 60
+PASSWORD_RESET_TOKEN_TTL_MINUTES = 30
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
@@ -353,5 +360,97 @@ def logout_all(db: Session = Depends(get_db), user = Depends(require_roles(Roles
     db.add(user)
     db.commit()
     return {"message": "Logged out from all sessions"}
+
+
+_FORGOT_PASSWORD_RESPONSE = {"message": "If an account exists for this email, a reset link has been sent."}
+
+
+@router.post("/forgot-password")
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Request a password reset link.
+
+    Always returns the same response whether or not the email is registered,
+    so this endpoint can't be used to find registered accounts. The email
+    itself is sent via BackgroundTasks (after the response is sent) so the
+    "exists" and "doesn't exist" paths also take the same amount of time --
+    the slow part (talking to the email provider) never runs on the request
+    path either way.
+    """
+    verify_turnstile(
+        payload.turnstile_token,
+        request.client.host if request.client else None,
+        expected_actions={"forgot_password"},
+    )
+    email_normalized = payload.email.lower()
+    user = db.query(User).filter(User.email == email_normalized, User.is_deleted == False).first()  # noqa: E712
+    if user:
+        now = datetime.now(timezone.utc)
+        requested_at = user.password_reset_requested_at
+        if requested_at is not None and requested_at.tzinfo is None:
+            requested_at = requested_at.replace(tzinfo=timezone.utc)
+        on_cooldown = (
+            requested_at is not None
+            and (now - requested_at).total_seconds() < PASSWORD_RESET_COOLDOWN_SECONDS
+        )
+        if not on_cooldown:
+            # A new request invalidates any previous token (single active token per user).
+            raw_token = secrets.token_urlsafe(32)
+            user.password_reset_token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+            user.password_reset_expires_at = now + timedelta(minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES)
+            user.password_reset_requested_at = now
+            db.add(user)
+            db.commit()
+
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+            reset_link = f"{frontend_url}/reset-password?token={raw_token}"
+            background_tasks.add_task(send_password_reset_email, user.email, reset_link)
+        # On cooldown: skip silently -- same response, no new email, no DB write.
+    return _FORGOT_PASSWORD_RESPONSE
+
+
+@router.post("/reset-password")
+def reset_password(
+    payload: ResetPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Set a new password from a forgot-password link.
+
+    Works for Google-only accounts too (password_hash is NULL) -- a reset
+    simply sets one, so those users aren't locked out of ever having a
+    password. The token is single-use: cleared on success, and a mismatch or
+    expiry both return the same generic error so neither leaks which check
+    failed.
+    """
+    token_hash = hashlib.sha256(payload.token.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    user = (
+        db.query(User)
+        .filter(
+            User.password_reset_token_hash == token_hash,
+            User.password_reset_expires_at > now,
+            User.is_deleted == False,  # noqa: E712
+        )
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This link is invalid or has expired")
+
+    user.password_hash = hash_password(payload.new_password)
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    user.token_version = int(user.token_version or 1) + 1
+    db.add(user)
+    db.commit()
+
+    background_tasks.add_task(send_password_changed_email, user.email)
+    return {"message": "Password has been reset"}
 
 

@@ -42,6 +42,13 @@ class User(Base):
     # OTP login fields
     otp_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
     otp_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Forgot-password reset token. Only the hash is ever stored; the raw token
+    # is only in the emailed link. Single-use: cleared on successful reset.
+    password_reset_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Per-account cooldown (one reset email per 60s) so /auth/forgot-password
+    # can't be used to spam an inbox or burn the email-provider quota.
+    password_reset_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
