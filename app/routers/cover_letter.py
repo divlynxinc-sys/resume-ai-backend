@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import UsageFeature
@@ -29,11 +29,11 @@ router = APIRouter(prefix="/cover-letter", tags=["Cover Letter"])
 
 class CoverLetterRequest(BaseModel):
     resume_id: Optional[int] = None
-    resume_text: Optional[str] = None
-    job_description: str
-    tone: Optional[str] = "professional"
-    company: Optional[str] = None
-    role: Optional[str] = None
+    resume_text: Optional[str] = Field(default=None, max_length=20000)
+    job_description: str = Field(max_length=20000)
+    tone: Optional[str] = Field(default="professional", max_length=50)
+    company: Optional[str] = Field(default=None, max_length=200)
+    role: Optional[str] = Field(default=None, max_length=200)
 
 
 @router.post("/generate")
