@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field, HttpUrl, EmailStr
 
@@ -63,6 +64,7 @@ class ResumeCreate(BaseModel):
     title: str
     template_id: Optional[int] = None
     content: Optional[ResumeContent] = None
+    import_request_id: UUID | None = None
 
 
 class ResumeUpdate(BaseModel):

@@ -35,6 +35,24 @@ def create_resume(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
+    imported_content = None
+    if payload.import_request_id is not None:
+        if payload.content is None:
+            raise HTTPException(400, detail="Provide the reviewed resume content.")
+        request_id = str(payload.import_request_id)
+        # Serialize confirmations for the same account so a retry after an
+        # interrupted response can return the original committed resume.
+        db.query(User.id).filter(User.id == user.id).with_for_update().one()
+        prior = db.query(Resume).filter(
+            Resume.user_id == user.id,
+            Resume.is_deleted == False,  # noqa: E712
+            Resume.content["custom"]["import_request_id"].as_string() == request_id,
+        ).first()
+        if prior:
+            return _resume_detail(prior)
+        imported_content = payload.content.model_dump()
+        imported_content["custom"]["import_request_id"] = request_id
+
     now = datetime.now(timezone.utc)
     next_local_id = (db.query(func.coalesce(func.max(Resume.user_resume_id), 0)).filter(Resume.user_id == user.id).scalar() or 0) + 1
     instance = Resume(
@@ -43,13 +61,17 @@ def create_resume(
         title=payload.title,
         template_id=payload.template_id,
         status="draft",
-        content=(payload.content.model_dump() if isinstance(payload.content, ResumeContent) else payload.content) if payload.content else (_default_content() if mode == "scratch" else {}),
+        content=imported_content or (payload.content.model_dump() if payload.content else (_default_content() if mode == "scratch" else {})),
         created_at=now,
         updated_at=now,
     )
     db.add(instance)
     db.commit()
     db.refresh(instance)
+    return _resume_detail(instance)
+
+
+def _resume_detail(instance: Resume) -> ResumeDetail:
     return ResumeDetail(
         id=instance.user_resume_id,
         title=instance.title,
@@ -65,12 +87,13 @@ def create_resume(
 def parse_upload_preview(
     request: Request,
     file: UploadFile = File(...),
+    include_review: bool = Query(default=False),
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
     """Parse uploaded PDF/DOCX and return extracted content (preview only, no save)."""
     db.rollback()
-    return parse_resume_upload(file, request)
+    return parse_resume_upload(file, request, include_review=include_review)
 
 
 @router.post("/from-upload", response_model=ResumeDetail, status_code=status.HTTP_201_CREATED)
@@ -213,6 +236,19 @@ def build_resume_from_upload(
             existing[key] = combined[:100]
         elif key == "summary" and parsed[key]:
             existing[key] = parsed[key] if not (existing.get(key)) else existing[key]
+
+    parsed_custom = parsed.get("custom") or {}
+    stored_custom = existing.get("custom")
+    current_custom = dict(stored_custom) if isinstance(stored_custom, dict) else {}
+    parsed_sections = parsed_custom.get("sections") or []
+    parsed_projects = parsed_custom.get("projects") or []
+    if parsed_sections or parsed_projects:
+        for name, incoming in (("sections", parsed_sections), ("projects", parsed_projects)):
+            stored = current_custom.get(name)
+            values = list(stored) if isinstance(stored, list) else []
+            values.extend(item for item in incoming if item not in values)
+            current_custom[name] = values
+        existing["custom"] = current_custom
 
     r.content = existing
     r.updated_at = datetime.now(timezone.utc)

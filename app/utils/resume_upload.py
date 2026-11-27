@@ -40,12 +40,15 @@ async def _write_input(stream, data: bytes) -> None:
         await stream.aclose()
 
 
-async def _run_worker(data: bytes, extension: str) -> dict:
+async def _run_worker(data: bytes, extension: str, include_review: bool) -> dict:
     process = None
     try:
         with anyio.fail_after(WORKER_TIMEOUT_SECONDS):
+            args = [sys.executable, "-m", "app.utils.resume_parse_worker", extension]
+            if include_review:
+                args.append("review")
             process = await anyio.open_process(
-                [sys.executable, "-m", "app.utils.resume_parse_worker", extension],
+                args,
                 stdin=PIPE, stdout=PIPE, stderr=DEVNULL,
             )
             output = bytearray()
@@ -85,13 +88,13 @@ async def _run_worker(data: bytes, extension: str) -> dict:
                 await process.aclose()
 
 
-async def _parse_in_worker(data: bytes, extension: str) -> dict:
+async def _parse_in_worker(data: bytes, extension: str, include_review: bool = False) -> dict:
     try:
         _parser_slots.acquire_nowait()
     except anyio.WouldBlock as exc:
         raise upload_error("parser_busy") from exc
     try:
-        return await _run_worker(data, extension)
+        return await _run_worker(data, extension, include_review)
     finally:
         _parser_slots.release()
 
@@ -103,7 +106,7 @@ async def _validate_form(request: Request) -> None:
         raise upload_error("invalid_multipart")
 
 
-def parse_resume_upload(file: UploadFile, request: Request) -> dict:
+def parse_resume_upload(file: UploadFile, request: Request, *, include_review: bool = False) -> dict:
     anyio.from_thread.run(_validate_form, request)
     extension = Path(file.filename or "").suffix.lower()
     if extension not in {".pdf", ".docx"}:
@@ -116,7 +119,7 @@ def parse_resume_upload(file: UploadFile, request: Request) -> dict:
         raise upload_error("upload_too_large")
     if not data:
         raise upload_error("unreadable_document")
-    return anyio.from_thread.run(_parse_in_worker, data, extension)
+    return anyio.from_thread.run(_parse_in_worker, data, extension, include_review)
 
 
 def is_resume_upload(method: str, path: str) -> bool:

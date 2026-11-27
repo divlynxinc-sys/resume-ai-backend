@@ -5,7 +5,7 @@ MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 MAX_ADDRESS_SPACE = 192 * 1024 * 1024
 
 
-def parse_input(extension: str):
+def parse_input(extension: str, include_review: bool = False):
     if sys.platform.startswith("linux"):
         import resource
 
@@ -20,7 +20,7 @@ def parse_input(extension: str):
     if len(data) > MAX_DOCUMENT_BYTES:
         return {"error": "upload_too_large"}
     try:
-        return {"content": parse_uploaded_resume(data, "resume" + extension)}
+        return {"content": parse_uploaded_resume(data, "resume" + extension, include_review=include_review)}
     except EmptyDocumentError:
         return {"error": "no_extractable_text"}
     except (DocumentLimitError, MemoryError):
@@ -30,4 +30,4 @@ def parse_input(extension: str):
 
 
 if __name__ == "__main__":
-    print(json.dumps(parse_input(sys.argv[1]), ensure_ascii=True))
+    print(json.dumps(parse_input(sys.argv[1], len(sys.argv) == 3 and sys.argv[2] == "review"), ensure_ascii=True))
