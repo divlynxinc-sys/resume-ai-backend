@@ -278,16 +278,15 @@ def ai_optimized_resume_to_backend_content(
     updated["skills"] = deduped
 
     # Backend doesn't have a projects section; keep it in `custom` so we don't lose it.
-    ai_projects = ai_resume.get("projects") or []
+    ai_projects = ai_resume.get("projects")
     if isinstance(ai_projects, list):
-        custom = updated.get("custom") or {}
-        if not isinstance(custom, dict):
-            custom = {}
+        existing_custom = updated.get("custom")
+        custom = dict(existing_custom) if isinstance(existing_custom, dict) else {}
 
         # The custom link DISPLAY LABEL (feature 1.4) is a user presentation
         # choice the LLM neither sees nor regenerates. Preserve it (and the
         # original URL when the AI dropped it) across optimization, matching the
-        # prior projects positionally with a title fallback.
+        # prior projects by title, with a positional fallback for renames.
         prior_projects = custom.get("projects") or []
         prior_by_index = prior_projects if isinstance(prior_projects, list) else []
         prior_by_title = {
@@ -298,13 +297,11 @@ def ai_optimized_resume_to_backend_content(
         merged_projects = []
         for i, proj in enumerate(ai_projects):
             if not isinstance(proj, dict):
-                merged_projects.append(proj)
                 continue
-            prior = None
-            if i < len(prior_by_index) and isinstance(prior_by_index[i], dict):
+            proj = dict(proj)
+            prior = prior_by_title.get(str(proj.get("title", "")).strip().lower())
+            if prior is None and i < len(prior_by_index) and isinstance(prior_by_index[i], dict):
                 prior = prior_by_index[i]
-            if prior is None:
-                prior = prior_by_title.get(str(proj.get("title", "")).strip().lower())
             if isinstance(prior, dict):
                 label = prior.get("link_label")
                 if label and not proj.get("link_label"):
@@ -314,6 +311,22 @@ def ai_optimized_resume_to_backend_content(
             merged_projects.append(proj)
 
         custom["projects"] = merged_projects
+        custom["sections"] = []
+        for project in merged_projects:
+            link = project.get("link")
+            url = link.get("url") if isinstance(link, dict) else link
+            label = link.get("label") if isinstance(link, dict) else None
+            bullets = project.get("bullets")
+            if isinstance(bullets, list):
+                content = "\n".join(item for item in bullets if isinstance(item, str))
+            else:
+                content = str(bullets or project.get("description") or "")
+            custom["sections"].append({
+                "title": project.get("title") or project.get("name") or "",
+                "content": content,
+                "link": str(url or ""),
+                "linkLabel": str(label or project.get("link_label") or ""),
+            })
         updated["custom"] = custom
 
     return updated
