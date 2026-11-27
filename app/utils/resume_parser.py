@@ -1,5 +1,6 @@
 """Parse resume text from PDF/DOCX into structured ResumeContent."""
 import re
+from zipfile import ZipFile
 from io import BytesIO
 from typing import Any
 from urllib.parse import urlparse
@@ -12,22 +13,73 @@ from app.schemas.resume_schema import (
     ResumeContent,
 )
 
+MAX_TEXT_LENGTH = 100_000
+MAX_LINE_LENGTH = 4096
+MAX_PDF_PAGES = 50
+MAX_DOCX_TOTAL = 32 * 1024 * 1024
+MAX_DOCX_MEMBER = 16 * 1024 * 1024
+MAX_DOCX_ENTRIES = 1000
+
+
+class DocumentLimitError(ValueError):
+    pass
+
+
+class EmptyDocumentError(ValueError):
+    pass
+
+
+def _check_text(text: str) -> None:
+    if len(text) > MAX_TEXT_LENGTH or any(len(line) > MAX_LINE_LENGTH for line in text.splitlines()):
+        raise DocumentLimitError()
+
 
 def _extract_text_from_pdf(file_bytes: bytes) -> str:
     import pdfplumber
+    if not file_bytes.startswith(b"%PDF-"):
+        raise ValueError("invalid PDF")
     text_parts = []
+    total = 0
     with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+        if pdf.doc.encryption is not None:
+            raise ValueError("protected PDF")
+        if len(pdf.pages) > MAX_PDF_PAGES:
+            raise DocumentLimitError()
         for page in pdf.pages:
-            t = page.extract_text()
+            try:
+                t = page.extract_text()
+            finally:
+                page.close()
             if t:
+                _check_text(t)
+                total += len(t) + 2
+                if total > MAX_TEXT_LENGTH:
+                    raise DocumentLimitError()
                 text_parts.append(t)
     return "\n\n".join(text_parts) if text_parts else ""
 
 
 def _extract_text_from_docx(file_bytes: bytes) -> str:
     from docx import Document
+    with ZipFile(BytesIO(file_bytes)) as archive:
+        entries = archive.infolist()
+        if (len(entries) > MAX_DOCX_ENTRIES or sum(entry.file_size for entry in entries) > MAX_DOCX_TOTAL
+                or any(entry.file_size > MAX_DOCX_MEMBER for entry in entries)):
+            raise DocumentLimitError()
+        if any(entry.flag_bits & 1 for entry in entries) or "[Content_Types].xml" not in archive.namelist():
+            raise ValueError("protected or invalid DOCX")
     doc = Document(BytesIO(file_bytes))
-    return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    paragraphs = []
+    total = 0
+    for paragraph in doc.paragraphs:
+        text = paragraph.text
+        if text.strip():
+            _check_text(text)
+            total += len(text) + 1
+            if total > MAX_TEXT_LENGTH:
+                raise DocumentLimitError()
+            paragraphs.append(text)
+    return "\n".join(paragraphs)
 
 
 def extract_text(file_bytes: bytes, filename: str) -> str:
@@ -40,8 +92,11 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
 
 
 def _extract_email(text: str) -> str | None:
-    match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
-    return match.group(0) if match else None
+    for token in re.split(r"""[\s<>()\[\]{},;:|"']+""", text):
+        candidate = token.rstrip(".")
+        if "@" in candidate and re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", candidate):
+            return candidate
+    return None
 
 
 def _extract_phone(text: str) -> str | None:
@@ -113,14 +168,17 @@ _TWITTER_URL_PAT = re.compile(
 _URL_WITH_SCHEME_PAT = re.compile(r"(?i)\bhttps?://[^\s\)\]\}>,\"']+")
 _WWW_URL_PAT = re.compile(r"(?i)\bwww\.[^\s\)\]\}>,\"']+")
 # Bare domain with a path (e.g. `example.com/resume`).
-_BARE_DOMAIN_WITH_PATH_PAT = re.compile(r"(?i)\b((?:[a-z0-9-]+\.)+[a-z]{2,})/[^\s\)\]\}>,\"']+")
+_BARE_DOMAIN_WITH_PATH_PAT = re.compile(r"(?i)(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63}/[^\s\)\]\}>,\"']+")
 
 
 def _extract_url_candidates(text: str) -> list[str]:
     candidates: list[str] = []
-    for pat in (_URL_WITH_SCHEME_PAT, _WWW_URL_PAT, _BARE_DOMAIN_WITH_PATH_PAT):
+    for pat in (_URL_WITH_SCHEME_PAT, _WWW_URL_PAT):
         for m in pat.finditer(text):
             candidates.append(m.group(0))
+    for token in re.split(r"""[\s<>()\[\]{},|"']+""", text):
+        if "/" in token and _BARE_DOMAIN_WITH_PATH_PAT.fullmatch(token):
+            candidates.append(token)
     normalized = [_normalize_url(c) for c in candidates]
     return _dedupe_preserve_order([u for u in normalized if u])
 
@@ -497,6 +555,7 @@ def _guess_name_from_text(text: str) -> str:
 
 
 def parse_resume_content(text: str, filename: str = "") -> dict:
+    _check_text(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()
@@ -629,4 +688,6 @@ def parse_resume_content(text: str, filename: str = "") -> dict:
 
 def parse_uploaded_resume(file_bytes: bytes, filename: str) -> dict:
     text = extract_text(file_bytes, filename)
+    if not text.strip():
+        raise EmptyDocumentError()
     return parse_resume_content(text, filename)

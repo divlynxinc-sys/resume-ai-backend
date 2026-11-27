@@ -29,6 +29,7 @@ from app.routers.interviews import router as interviews_router, internal_router 
 from app.routers.interview_credits import router as interview_credits_router
 from app.routers.job_description import router as job_description_router
 from app.middleware.session import UserSessionMiddleware
+from app.middleware.resume_upload import ResumeUploadIngress
 from app.core.swagger import setup_swagger
 
 
@@ -67,6 +68,7 @@ setup_swagger(app)
 _raw_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 cors_origins: List[str] = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()]
 
+app.add_middleware(ResumeUploadIngress)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
