@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 
@@ -39,6 +39,7 @@ class User(Base):
     # change it, and always with a matching interview_credit_transactions row.
     interview_credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     # OTP login fields
     otp_code: Mapped[str | None] = mapped_column(String(6), nullable=True)
     otp_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

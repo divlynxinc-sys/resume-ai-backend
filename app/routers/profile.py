@@ -13,8 +13,7 @@ from app.utils.auth_utils import hash_password, verify_password
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
 
-@router.get("/me", response_model=UserPublic)
-def get_me(user: User = Depends(require_roles(Roles.user, Roles.admin))):
+def _user_public(user: User) -> UserPublic:
     return UserPublic(
         id=str(user.id),
         name=user.name,
@@ -25,7 +24,21 @@ def get_me(user: User = Depends(require_roles(Roles.user, Roles.admin))):
         linkedin_url=user.linkedin_url,
         portfolio_url=user.portfolio_url,
         credits_remaining=int(user.credits_remaining or 0),
+        onboarding_completed=user.onboarding_completed,
     )
+
+
+@router.get("/me", response_model=UserPublic)
+def get_me(user: User = Depends(require_roles(Roles.user, Roles.admin))):
+    return _user_public(user)
+
+
+@router.post("/onboarding/complete", response_model=UserPublic)
+def complete_onboarding(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not user.onboarding_completed:
+        user.onboarding_completed = True
+        db.commit()
+    return _user_public(user)
 
 
 @router.patch("/me", response_model=UserPublic)
@@ -43,17 +56,7 @@ def update_me(payload: ProfileUpdate, db: Session = Depends(get_db), user: User 
     db.add(user)
     db.commit()
     db.refresh(user)
-    return UserPublic(
-        id=str(user.id),
-        name=user.name,
-        email=user.email,
-        role=user.role or Roles.user,
-        phone=user.phone,
-        location=user.location,
-        linkedin_url=user.linkedin_url,
-        portfolio_url=user.portfolio_url,
-        credits_remaining=int(user.credits_remaining or 0),
-    )
+    return _user_public(user)
 
 
 @router.post("/change-password", response_model=UserPublic)
@@ -74,17 +77,7 @@ def change_password(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return UserPublic(
-        id=str(user.id),
-        name=user.name,
-        email=user.email,
-        role=user.role or Roles.user,
-        phone=user.phone,
-        location=user.location,
-        linkedin_url=user.linkedin_url,
-        portfolio_url=user.portfolio_url,
-        credits_remaining=int(user.credits_remaining or 0),
-    )
+    return _user_public(user)
 
 
 @router.post("/sync-from-resume/{resume_id}", response_model=UserPublic)
@@ -118,15 +111,5 @@ def sync_profile_from_resume(
         db.add(user)
         db.commit()
     db.refresh(user)
-    return UserPublic(
-        id=str(user.id),
-        name=user.name,
-        email=user.email,
-        role=user.role or Roles.user,
-        phone=user.phone,
-        location=user.location,
-        linkedin_url=user.linkedin_url,
-        portfolio_url=user.portfolio_url,
-        credits_remaining=int(user.credits_remaining or 0),
-    )
+    return _user_public(user)
 
