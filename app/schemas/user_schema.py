@@ -68,6 +68,7 @@ class UserPublic(BaseModel):
     linkedin_url: str | None = None
     portfolio_url: str | None = None
     credits_remaining: int = 0
+    onboarding_completed: bool = True
 
 
 class ProfileUpdate(BaseModel):
