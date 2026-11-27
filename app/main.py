@@ -4,8 +4,11 @@ import sys
 from typing import List
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.utils.turnstile import _is_production
 
@@ -63,6 +66,17 @@ app = FastAPI(
 )
 
 setup_swagger(app)
+
+_SIGNUP_PATHS = {"/auth/signup", "/auth/signup/send-otp", "/auth/signup/verify-otp"}
+
+
+@app.exception_handler(RequestValidationError)
+async def validate_request_without_signup_secrets(request: Request, exc: RequestValidationError):
+    if request.url.path.rstrip("/") not in _SIGNUP_PATHS:
+        return await request_validation_exception_handler(request, exc)
+    detail = [{key: error[key] for key in ("loc", "msg", "type")} for error in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": detail})
+
 
 _raw_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 cors_origins: List[str] = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()]

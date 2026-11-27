@@ -5,6 +5,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Optional
 
+import httpx
 import resend
 
 
@@ -42,7 +43,7 @@ def _send_via_resend(to_email: str, subject: str, html_body: str) -> bool:
         return False
 
 
-def _send_via_smtp(to_email: str, subject: str, html_body: str, plain_text: str) -> bool:
+def _send_via_smtp(to_email: str, subject: str, html_body: str, plain_text: str, *, report_error: bool = True) -> bool:
     smtp_host = os.getenv("SMTP_HOST")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USERNAME")
@@ -69,7 +70,8 @@ def _send_via_smtp(to_email: str, subject: str, html_body: str, plain_text: str)
             server.send_message(msg)
         return True
     except Exception as e:
-        print(f"[email] SMTP send failed for {to_email}: {e}")
+        if report_error:
+            print(f"[email] SMTP send failed for {to_email}: {e}")
         return False
 
 
@@ -86,6 +88,33 @@ def send_otp_email(to_email: str, otp_code: str, *, subject: Optional[str] = Non
         return
 
     print(f"[DEV] OTP for {to_email}: {otp_code}")
+
+
+def send_signup_otp_email(to_email: str, code: str, expiry_minutes: int, delivery_id: str) -> bool:
+    html = _load_template("otp_signup.html").replace("{{OTP_CODE}}", code)
+    html = html.replace("{{EXPIRY_MINUTES}}", str(expiry_minutes))
+    subject = "Verify your email - Jobsynk AI"
+    text = f"Your verification code is: {code}\nThis code expires in {expiry_minutes} minutes."
+    api_key = os.getenv("RESEND_API_KEY")
+    if api_key:
+        try:
+            result = httpx.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {api_key}", "Idempotency-Key": delivery_id},
+                json={"from": os.getenv("RESEND_FROM_EMAIL", "JobSynkai <noreply@jobsynk.co>"),
+                      "to": [to_email], "subject": subject, "html": html, "text": text},
+                timeout=8.0,
+            )
+        except httpx.HTTPError:
+            return False
+        if result.is_success:
+            return True
+        if result.status_code in (408, 409) or result.status_code >= 500:
+            return False
+    try:
+        return _send_via_smtp(to_email, subject, html, text, report_error=False)
+    except ValueError:
+        return False
 
 
 def send_password_reset_email(to_email: str, reset_link: str) -> None:

@@ -980,7 +980,25 @@ Both list all endpoints and allow testing.
 
 ---
 
-### OTP Login Flow
+### Email signup verification
+
+1. Send POST `/auth/signup/send-otp` with `email` and a fresh signup
+   `turnstile_token`. A success includes `challenge_id`, `expires_at`,
+   `resend_available_at`, and `server_now` as UTC timestamps. Apply both
+   timestamps independently. A resend uses the same endpoint and a fresh
+   Turnstile result. Rate-limit and delivery errors can include `retry_at`,
+   `server_now` and `Retry-After`.
+2. Send POST `/auth/signup/verify-otp` with `email`, the returned `challenge_id`
+   and the code from the user's email. A successful result includes a
+   single-use `signup_token` and `signup_expires_at`.
+3. Send POST `/auth/signup` with `name`, the same `email`, `password`, and
+   `signup_token`. Keep the signup token in memory and submit it over HTTPS.
+   A successful request creates the account and returns the normal token pair.
+
+The backend requires a server-only `SIGNUP_OTP_HMAC_KEY` with at least
+32 bytes of high-entropy secret material. All workers use the same key.
+
+### Legacy login OTP
 
 **Step 0 – optional (legacy login, no OTP):**
 
