@@ -1,8 +1,7 @@
-import json
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status, Body
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -15,7 +14,7 @@ from app.models.user import User
 from app.models.ats_score import ResumeATSScore
 from app.schemas.resume_schema import ResumeCreate, ResumeDetail, ResumeItem, ResumeUpdate, ResumeSection, ResumeContent
 from app.schemas.ats_schema import ATSScorePayload, ATSScoreResponse
-from app.utils.resume_parser import parse_uploaded_resume
+from app.utils.resume_upload import parse_resume_upload
 from app.utils.ai_client import get_ai_base_url, post_json
 from app.utils.resume_ai_adapter import (
     ai_optimized_resume_to_backend_content,
@@ -24,10 +23,6 @@ from app.utils.resume_ai_adapter import (
 )
 
 router = APIRouter(prefix="/resumes", tags=["Resumes"])
-
-ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx"}
-MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
-
 
 def _default_content() -> dict:
     return ResumeContent().model_dump()
@@ -68,29 +63,19 @@ def create_resume(
 
 @router.post("/parse-upload")
 def parse_upload_preview(
+    request: Request,
     file: UploadFile = File(...),
+    db: Session = Depends(get_db),
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
     """Parse uploaded PDF/DOCX and return extracted content (preview only, no save)."""
-    if not file.filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No filename")
-    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format. Use PDF or DOCX.")
-    content_bytes = file.file.read()
-    if len(content_bytes) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File too large (max 10MB)")
-    try:
-        parsed = parse_uploaded_resume(content_bytes, file.filename)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Parse error: {str(e)}")
-    return parsed
+    db.rollback()
+    return parse_resume_upload(file, request)
 
 
 @router.post("/from-upload", response_model=ResumeDetail, status_code=status.HTTP_201_CREATED)
 def create_resume_from_upload(
+    request: Request,
     file: UploadFile = File(...),
     title: str | None = Query(default=None, description="Resume title (default: filename)"),
     template_id: int | None = Query(default=None),
@@ -98,32 +83,15 @@ def create_resume_from_upload(
     user: User = Depends(require_roles(Roles.user, Roles.admin)),
 ):
     """Upload PDF/DOCX resume, parse it, and create a new resume with extracted data in all sections."""
-    if not file.filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No filename")
-    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported format. Use PDF or DOCX.",
-        )
-    content_bytes = file.file.read()
-    if len(content_bytes) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File too large (max 10MB)")
-    try:
-        parsed = parse_uploaded_resume(content_bytes, file.filename)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Parse error: {str(e)}")
-
-    # Ensure content is JSON-serializable for DB storage
-    content_to_store = json.loads(json.dumps(parsed, default=str)) if parsed else {}
+    user_id = user.id
+    db.rollback()
+    content_to_store = parse_resume_upload(file, request)
 
     resume_title = title or (file.filename.rsplit(".", 1)[0] if "." in file.filename else file.filename)
     now = datetime.now(timezone.utc)
-    next_local_id = (db.query(func.coalesce(func.max(Resume.user_resume_id), 0)).filter(Resume.user_id == user.id).scalar() or 0) + 1
+    next_local_id = (db.query(func.coalesce(func.max(Resume.user_resume_id), 0)).filter(Resume.user_id == user_id).scalar() or 0) + 1
     instance = Resume(
-        user_id=user.id,
+        user_id=user_id,
         user_resume_id=next_local_id,
         title=resume_title,
         template_id=template_id,
@@ -165,8 +133,9 @@ def list_resumes(
     return {"items": items, "total": total_count}
 
 
-def _get_owned_resume(db: Session, user_id: int, resume_id: int) -> Resume:
-    r = db.query(Resume).filter(Resume.user_id == user_id, Resume.user_resume_id == resume_id, Resume.is_deleted == False).first()  # noqa: E712
+def _get_owned_resume(db: Session, user_id: int, resume_id: int, *, lock: bool = False) -> Resume:
+    query = db.query(Resume).filter(Resume.user_id == user_id, Resume.user_resume_id == resume_id, Resume.is_deleted == False)  # noqa: E712
+    r = (query.with_for_update(of=Resume) if lock else query).first()
     if not r:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
     return r
@@ -215,26 +184,17 @@ def update_resume(resume_id: int, payload: ResumeUpdate, db: Session = Depends(g
 @router.patch("/{resume_id}/from-upload", response_model=ResumeDetail)
 def build_resume_from_upload(
     resume_id: int,
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Upload PDF/DOCX and merge parsed data into existing resume (Build upon existing)."""
-    r = _get_owned_resume(db, user.id, resume_id)
-    if not file.filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No filename")
-    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format. Use PDF or DOCX.")
-    content_bytes = file.file.read()
-    if len(content_bytes) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File too large (max 10MB)")
-    try:
-        parsed = parse_uploaded_resume(content_bytes, file.filename)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Parse error: {str(e)}")
+    user_id = user.id
+    _get_owned_resume(db, user_id, resume_id)
+    db.rollback()
+    parsed = parse_resume_upload(file, request)
+    r = _get_owned_resume(db, user_id, resume_id, lock=True)
 
     existing = dict(r.content or {})
     for key in ["info", "experience", "education", "skills", "summary"]:
