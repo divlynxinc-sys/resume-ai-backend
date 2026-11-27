@@ -3,7 +3,8 @@ from io import BytesIO
 from docx import Document
 
 from app.utils.docx_builder import build_resume_docx
-from app.utils.resume_import import _project_title_and_label
+from app.utils.resume_import import _bullet_text, _project_title_and_label
+from app.utils.resume_layout import Line
 from app.utils.resume_parser import parse_uploaded_resume
 
 
@@ -11,6 +12,18 @@ def test_pdf_link_label_spacing_does_not_change_the_visible_project_title():
     assert _project_title_and_label("Portfolio Website View portfolio", "Viewportfolio") == (
         "Portfolio Website", "View portfolio",
     )
+
+
+def test_sidebar_wrapped_phrase_keeps_its_line_and_the_next_bullet_stays_separate():
+    lines = [
+        Line("Grouped candidates into Watch / On", y=10, wrap_gap=12, wrap_style="sidebar"),
+        Line("Track, enabling better follow-up", y=22, wrap_gap=12, wrap_style="sidebar"),
+        Line("Scraped, cleaned and mapped data", y=34, wrap_gap=12, wrap_style="sidebar"),
+    ]
+    assert _bullet_text(lines) == [
+        "Grouped candidates into Watch / On Track, enabling better follow-up",
+        "Scraped, cleaned and mapped data",
+    ]
 
 
 def test_word_export_recovers_independent_education_experience_and_project_fields():

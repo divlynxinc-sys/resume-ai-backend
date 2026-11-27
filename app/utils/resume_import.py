@@ -87,16 +87,17 @@ def _bullet_text(lines: list[Line]) -> list[str]:
         text = BULLET.sub("", line.text).strip()
         if not text:
             continue
-        wrapped_prefix = not text[0].isupper() or (
-            line.wrap_style == "sidebar" and text.split(None, 1)[0].endswith(",")
+        wrapped_prefix = not text[0].isupper()
+        open_ending = previous is not None and previous.text.casefold().endswith(
+            ("-", ",", "/", " a", " an", " the", " and", " on", " of", " for", " to", " with")
         )
         continuation = previous is not None and not _is_bullet(line) and (
             labeled
             or (line.wrap_gap and previous.page == line.page and 0 < line.y - previous.y <= line.wrap_gap
-                and (line.wrap_style == "standard" or wrapped_prefix or previous.text.endswith(("-", ","))))
+                and (line.wrap_style == "standard" or wrapped_prefix or open_ending))
         )
         if continuation:
-            result[-1] += " " + text
+            result[-1] += ("" if result[-1].endswith("-") else " ") + text
         else:
             result.append(text)
         previous = line
