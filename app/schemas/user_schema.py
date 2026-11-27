@@ -27,21 +27,6 @@ class UserLogin(BaseModel):
     turnstile_token: str
 
 
-class OtpLoginStart(BaseModel):
-    email: EmailStr
-    password: str = Field(max_length=CURRENT_PASSWORD_MAX_LENGTH)
-
-
-class OtpVerifyRequest(BaseModel):
-    email: EmailStr
-    otp_code: str
-
-
-class OtpStartResponse(BaseModel):
-    message: str
-    otp_sent: bool = True
-
-
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"

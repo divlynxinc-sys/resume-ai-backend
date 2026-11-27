@@ -980,50 +980,19 @@ Both list all endpoints and allow testing.
 
 ---
 
-### OTP Login Flow
+### Email/password login
 
-**Step 0 – optional (legacy login, no OTP):**
+Use **POST `/auth/login`** with the email, password, and a fresh Turnstile
+response for the login action.
 
-- **POST `/auth/login`**  
-  - **Use**: Old flow; email + password → tokens directly (no OTP).
+```json
+{
+  "email": "user@example.com",
+  "password": "<password>",
+  "turnstile_token": "<turnstile-response>"
+}
+```
 
-**New OTP‑based flow:**
-
-1. **Step 1 – start OTP login**
-
-   - **POST `/auth/login/otp/start`**  
-     - **Body**:
-       ```json
-       {
-         "email": "user@example.com",
-         "password": "UserPass123!"
-       }
-       ```
-     - **Use**: Verify creds, generate 6‑digit OTP, send email, store OTP + expiry.  
-     - **Response**:
-       ```json
-       {
-         "message": "OTP sent to your email",
-         "otp_sent": true
-       }
-       ```
-
-2. **Step 2 – verify OTP and get tokens**
-
-   - **POST `/auth/login/otp/verify`**  
-     - **Body**:
-       ```json
-       {
-         "email": "user@example.com",
-         "otp_code": "123456"
-       }
-       ```
-     - **Use**: Validate OTP + expiry, then issue JWTs.  
-     - **Response** (same as normal login):
-       ```json
-       {
-         "access_token": "<JWT>",
-         "refresh_token": "<JWT>",
-         "token_type": "bearer"
-       }
-       ```
+Successful login returns an access token and a refresh token. Google sign-in
+continues to use `POST /auth/google`. Email verification during signup uses a
+separate signup code.
