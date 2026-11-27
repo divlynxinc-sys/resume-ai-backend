@@ -87,10 +87,13 @@ def _bullet_text(lines: list[Line]) -> list[str]:
         text = BULLET.sub("", line.text).strip()
         if not text:
             continue
+        wrapped_prefix = not text[0].isupper() or (
+            line.wrap_style == "sidebar" and text.split(None, 1)[0].endswith(",")
+        )
         continuation = previous is not None and not _is_bullet(line) and (
             labeled
             or (line.wrap_gap and previous.page == line.page and 0 < line.y - previous.y <= line.wrap_gap
-                and (not line.compact_spacing or not text[0].isupper() or previous.text.endswith(("-", ","))))
+                and (line.wrap_style == "standard" or wrapped_prefix or previous.text.endswith(("-", ","))))
         )
         if continuation:
             result[-1] += " " + text
@@ -202,6 +205,25 @@ def _web_link(url: str) -> str:
         return ""
 
 
+def _project_title_and_label(text: str, label: str) -> tuple[str, str]:
+    if not label:
+        return text, label
+    remaining = "".join(label.split())
+    if not remaining:
+        return text, ""
+    matched = len(remaining) - 1
+    for index in range(len(text) - 1, -1, -1):
+        char = text[index]
+        if char.isspace():
+            continue
+        if char != remaining[matched]:
+            break
+        matched -= 1
+        if matched < 0:
+            return text[:index].strip(" |·"), text[index:].strip()
+    return text, label
+
+
 def _projects(lines: list[Line]) -> tuple[list[dict], list[dict], list[Line]]:
     sections = []
     projects = []
@@ -219,7 +241,7 @@ def _projects(lines: list[Line]) -> tuple[list[dict], list[dict], list[Line]]:
 
     for line in lines:
         label, url = next(((label, url) for label, uri in line.links if (url := _web_link(uri))), ("", ""))
-        title = line.text.removesuffix(label).strip(" |·") if label else line.text
+        title, label = _project_title_and_label(line.text, label)
         if (line.bold or (not current and _short_label(line))) and title and not _is_bullet(line):
             save()
             current = {"title": title, "link": url, "linkLabel": label}

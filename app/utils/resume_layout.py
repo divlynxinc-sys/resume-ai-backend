@@ -17,7 +17,7 @@ class Line:
     size: float = 0
     page: int = 0
     wrap_gap: float = 0
-    compact_spacing: bool = False
+    wrap_style: str = "standard"
     skill_badges: bool = False
     spaced_words: tuple[str, ...] = ()
     links: tuple[tuple[str, str], ...] = ()
@@ -93,14 +93,16 @@ def _pdf_lines(page, source, page_number: int, split: bool) -> list[Line]:
             if link["x1"] <= raw["x0"] or link["x0"] >= raw["x1"]:
                 continue
             link_chars = [c for c in chars if link["x0"] - 0.7 <= (c["x0"] + c["x1"]) / 2 <= link["x1"] + 0.7]
-            label = extract_text(link_chars).strip() if link_chars else ""
+            label = extract_text(link_chars, x_tolerance=1).strip() if link_chars else ""
             if label and link.get("uri"):
                 links.append((label, link["uri"]))
         size = median(char["size"] for char in chars)
+        sidebar_spacing = split and "segoe" in font
         result.append(Line(
             text=text, bold=prefix, x=raw["x0"], y=raw["top"], page=page_number,
-            size=size, wrap_gap=size * spacing + 0.35,
-            compact_spacing="arial" in font, skill_badges="segoe" in font,
+            size=size, wrap_gap=size * spacing + (0.6 if sidebar_spacing else 0.35),
+            wrap_style="sidebar" if sidebar_spacing else "compact" if "arial" in font else "standard",
+            skill_badges="segoe" in font,
             spaced_words=tuple(extract_text(part, x_tolerance=1).strip() for part in word_parts),
             links=tuple(links),
         ))
@@ -124,7 +126,7 @@ def pdf_lines(file_bytes: bytes) -> list[Line]:
         for index, page in enumerate(document.pages):
             try:
                 divider = first_divider
-                if divider is None:
+                if divider is None or not page.bbox[0] < divider < page.bbox[2]:
                     columns = (_pdf_lines(page, page, index, False), [])
                 else:
                     x0, top, x1, bottom = page.bbox

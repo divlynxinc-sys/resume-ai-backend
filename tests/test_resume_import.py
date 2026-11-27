@@ -3,7 +3,14 @@ from io import BytesIO
 from docx import Document
 
 from app.utils.docx_builder import build_resume_docx
+from app.utils.resume_import import _project_title_and_label
 from app.utils.resume_parser import parse_uploaded_resume
+
+
+def test_pdf_link_label_spacing_does_not_change_the_visible_project_title():
+    assert _project_title_and_label("Portfolio Website View portfolio", "Viewportfolio") == (
+        "Portfolio Website", "View portfolio",
+    )
 
 
 def test_word_export_recovers_independent_education_experience_and_project_fields():
