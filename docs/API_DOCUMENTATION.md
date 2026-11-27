@@ -359,6 +359,17 @@ const response = await fetch(`${baseUrl}/resumes/from-upload`, {
 
 **Request Body (form-data):** `file` – PDF or DOCX
 
+Use `?include_review=true` to get `{content, warnings, unassigned, source_text}`.
+Both forms are read-only. To save reviewed data, send `content` and a UUID
+`import_request_id` to `POST /resumes?mode=scratch`. Reuse the same ID if
+that confirmation needs to be retried. The API returns the existing saved
+resume for the same account and request ID.
+
+The three upload endpoints accept one file up to 10 MB. Upload errors include
+`detail.code` and `detail.message`. A size violation returns 413.
+Unreadable files and files over the document-processing limits return 422.
+A busy parser returns 503 with `Retry-After: 2`.
+
 **Response (200):** Parsed content only (no DB save):
 ```json
 {
