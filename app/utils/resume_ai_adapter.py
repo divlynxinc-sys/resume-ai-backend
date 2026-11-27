@@ -279,7 +279,7 @@ def ai_optimized_resume_to_backend_content(
 
     # Backend doesn't have a projects section; keep it in `custom` so we don't lose it.
     ai_projects = ai_resume.get("projects")
-    if isinstance(ai_projects, list):
+    if isinstance(ai_projects, list) and ai_projects:
         existing_custom = updated.get("custom")
         custom = dict(existing_custom) if isinstance(existing_custom, dict) else {}
 
@@ -310,6 +310,8 @@ def ai_optimized_resume_to_backend_content(
                     proj["link"] = prior.get("link")
             merged_projects.append(proj)
 
+        if not merged_projects:
+            return updated
         custom["projects"] = merged_projects
         custom["sections"] = []
         for project in merged_projects:

@@ -35,3 +35,4 @@ def test_ai_result_mirrors_projects_with_existing_labels():
     }]
     assert prior["custom"]["sections"][0]["content"] == "Old bullet"
     assert ai_optimized_resume_to_backend_content(prior, None, {})["custom"] == prior["custom"]
+    assert ai_optimized_resume_to_backend_content(prior, None, {"projects": []})["custom"] == prior["custom"]
