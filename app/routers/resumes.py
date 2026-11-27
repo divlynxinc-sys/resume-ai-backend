@@ -321,6 +321,7 @@ def get_content(resume_id: int, section: Optional[ResumeSection] = Query(default
 def patch_content(
     resume_id: int,
     section: ResumeSection = Query(...),
+    merge_custom: bool = Query(default=False, description="Merge supplied top-level custom keys into the stored object"),
     payload: dict | list | str | None = Body(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -360,6 +361,12 @@ def patch_content(
         for k in ["job_title", "company", "description"]:
             if not payload.get(k):
                 raise HTTPException(status_code=400, detail=f"job_description.{k} is required")
+
+    elif section == ResumeSection.custom and merge_custom:
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="custom must be an object")
+        existing = content.get(section.value)
+        payload = {**existing, **payload} if isinstance(existing, dict) else payload
 
     content[section.value] = payload
     r.content = content
