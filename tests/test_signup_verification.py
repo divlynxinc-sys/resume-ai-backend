@@ -44,3 +44,25 @@ def test_grant_expiry_boundary_and_consumption(monkeypatch):
     assert row.grant_hash is None
     with pytest.raises(HTTPException):
         verification.consume_grant(None, "fixture@example.com", proof)
+
+
+def test_resend_cooldown_and_rolling_window_are_independent(monkeypatch):
+    now = datetime(2026, 11, 27, tzinfo=timezone.utc)
+    seconds = now.timestamp()
+    row = SimpleNamespace(send_times=[seconds - 59])
+    monkeypatch.setattr(verification, "load_for_update", lambda *_: row)
+    db = SimpleNamespace(execute=lambda _statement: None, commit=lambda: None)
+
+    with pytest.raises(HTTPException) as cooldown:
+        verification.reserve_send(db, "fixture@example.com", "A" * 24, now)
+    assert cooldown.value.headers["Retry-After"] == "1"
+    assert verification.reserve_send(db, "fixture@example.com", "A" * 24, now + timedelta(seconds=1)) == (
+        now + timedelta(seconds=61)
+    )
+
+    row.send_times = [seconds - 3599, seconds - 2000, seconds - 1000, seconds - 800, seconds - 600]
+    with pytest.raises(HTTPException) as hourly:
+        verification.reserve_send(db, "fixture@example.com", "A" * 24, now)
+    assert hourly.value.headers["Retry-After"] == "1"
+    verification.reserve_send(db, "fixture@example.com", "A" * 24, now + timedelta(seconds=1))
+    assert len(row.send_times) == verification.SEND_LIMIT
