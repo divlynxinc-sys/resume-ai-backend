@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -5,16 +7,35 @@ class UserCreate(BaseModel):
     name: str = Field(max_length=255)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    signup_token: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
 
 
 class SignupOtpSend(BaseModel):
     email: EmailStr
-    turnstile_token: str | None = None
+    turnstile_token: str = Field(max_length=2048)
 
 
 class SignupOtpVerify(BaseModel):
     email: EmailStr
-    otp_code: str
+    challenge_id: str = Field(pattern=r"^[A-Za-z0-9_-]{24}$")
+    otp_code: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class SignupOtpSent(BaseModel):
+    message: str
+    otp_sent: bool = True
+    challenge_id: str
+    expires_at: datetime
+    resend_available_at: datetime
+    server_now: datetime
+
+
+class SignupOtpVerified(BaseModel):
+    message: str
+    verified: bool = True
+    signup_token: str
+    signup_expires_at: datetime
+    server_now: datetime
 
 
 CURRENT_PASSWORD_MAX_LENGTH = 1024

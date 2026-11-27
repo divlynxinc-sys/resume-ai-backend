@@ -6,6 +6,7 @@ import random
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Roles
@@ -21,7 +22,9 @@ from app.schemas.user_schema import (
     ProfileUpdate,
     ResetPasswordRequest,
     SignupOtpSend,
+    SignupOtpSent,
     SignupOtpVerify,
+    SignupOtpVerified,
     TokenPair,
     TokenRefresh,
     UserCreate,
@@ -29,7 +32,8 @@ from app.schemas.user_schema import (
     UserPublic,
 )
 from app.utils.auth_utils import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
-from app.utils.email_utils import send_otp_email, send_password_changed_email, send_password_reset_email
+from app.utils.email_utils import send_otp_email, send_password_changed_email, send_password_reset_email, send_signup_otp_email
+from app.utils import signup_verification
 from app.utils.turnstile import verify_turnstile
 
 PASSWORD_RESET_COOLDOWN_SECONDS = 60
@@ -37,81 +41,50 @@ PASSWORD_RESET_TOKEN_TTL_MINUTES = 30
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
-# In-memory store for signup OTPs: {email: {"otp": str, "expires_at": datetime}}
-_signup_otps: dict[str, dict] = {}
-
-
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-@router.post("/signup/send-otp")
+@router.post("/signup/send-otp", response_model=SignupOtpSent)
 def signup_send_otp(payload: SignupOtpSend, request: Request, db: Session = Depends(get_db)):
-    """Send a 6-digit OTP to the given email for signup verification."""
-    email_normalized = payload.email.lower()
-    # A fresh challenge protects the first OTP request. Resends are allowed only
-    # for an email that already established an OTP session.
-    if payload.turnstile_token:
-        verify_turnstile(
-            payload.turnstile_token,
-            request.client.host if request.client else None,
-            expected_actions={"signup"},
-        )
-    elif email_normalized not in _signup_otps:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Please complete the security verification",
-        )
-
-    existing = db.query(User).filter(User.email == email_normalized).first()
+    verify_turnstile(
+        payload.turnstile_token,
+        request.client.host if request.client else None,
+        expected_actions={"signup"},
+    )
+    email = payload.email.lower()
+    existing = db.query(User.id).filter(User.email == email).first()
     if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Email already registered")
 
-    otp_code = f"{random.randint(0, 999999):06d}"
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    challenge = secrets.token_urlsafe(18)
+    digest = signup_verification.otp_digest(email, challenge, code)
+    retry_at = signup_verification.reserve_send(db, email, challenge, signup_verification.utc_now())
+    if not send_signup_otp_email(email, code, signup_verification.CODE_MINUTES, challenge):
+        raise signup_verification.signup_error(
+            503, "signup_email_unavailable", "Could not send a verification code. Please try again.",
+            signup_verification.utc_now(), retry_at,
+        )
+    now = signup_verification.utc_now()
+    expires = signup_verification.activate_code(db, email, challenge, digest, now)
+    return SignupOtpSent(
+        message="OTP sent to your email", challenge_id=challenge, expires_at=expires,
+        resend_available_at=retry_at, server_now=now,
+    )
 
-    _signup_otps[email_normalized] = {"otp": otp_code, "expires_at": expires_at}
 
-    send_otp_email(email_normalized, otp_code, subject="Verify your email - Jobsynk AI", template="otp_signup.html")
-
-    return {"message": "OTP sent to your email", "otp_sent": True}
-
-
-@router.post("/signup/verify-otp")
-def signup_verify_otp(payload: SignupOtpVerify):
-    """Verify the signup OTP code."""
-    email_normalized = payload.email.lower()
-    entry = _signup_otps.get(email_normalized)
-
-    if not entry:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No OTP found. Please request a new one.")
-
-    now = datetime.now(timezone.utc)
-    if entry["expires_at"] < now:
-        _signup_otps.pop(email_normalized, None)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OTP has expired. Please request a new one.")
-
-    if entry["otp"] != payload.otp_code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OTP code")
-
-    # Mark as verified (keep entry so signup can check it)
-    _signup_otps[email_normalized]["verified"] = True
-
-    return {"message": "Email verified successfully", "verified": True}
-
+@router.post("/signup/verify-otp", response_model=SignupOtpVerified)
+def signup_verify_otp(payload: SignupOtpVerify, db: Session = Depends(get_db)):
+    proof, expires, now = signup_verification.verify_code(db, payload.email.lower(), payload.challenge_id, payload.otp_code)
+    return SignupOtpVerified(
+        message="Email verified successfully", signup_token=proof, signup_expires_at=expires, server_now=now,
+    )
 
 @router.post("/signup", response_model=TokenPair)
 def signup(user: UserCreate, db: Session = Depends(get_db)):
     email_normalized = user.email.lower()
 
-    # Verify that email OTP was completed
-    otp_entry = _signup_otps.get(email_normalized)
-    if not otp_entry or not otp_entry.get("verified"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email not verified. Please verify your email first.")
-    _signup_otps.pop(email_normalized, None)
-
-    existing = db.query(User).filter(User.email == email_normalized).first()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+    signup_verification.consume_grant(db, email_normalized, user.signup_token)
     hashed_pw = hash_password(user.password)
     instance = User(
         name=user.name,
@@ -121,7 +94,13 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
         token_version=1,
     )
     db.add(instance)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if getattr(getattr(exc.orig, "diag", None), "constraint_name", None) == "ix_users_email":
+            raise HTTPException(status_code=400, detail="Email already registered") from exc
+        raise
     db.refresh(instance)
 
     # Return tokens so the user is logged in immediately

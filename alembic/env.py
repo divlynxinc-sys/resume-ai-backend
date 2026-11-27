@@ -18,6 +18,7 @@ if config.config_file_name is not None:
 
 # Import models and metadata
 from app.database.connection import Base  # noqa: E402
+from app.models import signup_verification as signup_verification_model  # noqa: E402
 from app.models import user as user_model  # ensure model is imported for autogenerate
 from app.models import session_tracking as session_tracking_model  # ensure model is imported
 from app.models import resume as resume_model  # ensure model is imported
